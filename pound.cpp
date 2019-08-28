@@ -1,15 +1,5 @@
-#include <fcntl.h>
-#include <stdio.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
-#include <array>
 #include <cctype>
-#include <cerrno>
-#include <sstream>
 #include <string>
-#include <type_traits>
-#include <vector>
 
 #include "piecetable.h"
 #include "pound.h"
