@@ -32,7 +32,9 @@ Terminal::~Terminal() {
 
 Position Terminal::getTerminalSize(bool refreshFromTerminal) {
     if (!refreshFromTerminal && _terminalSize) {
-        return *_terminalSize;
+        auto termSize = *_terminalSize;
+        termSize.row -= _prompt ? _prompt->lines() : 1;
+        return termSize;
     }
 
     winsize ws = {};
@@ -43,7 +45,9 @@ Position Terminal::getTerminalSize(bool refreshFromTerminal) {
         _terminalSize = {ws.ws_row, ws.ws_col};
     }
 
-    return *_terminalSize;
+    auto termSize = *_terminalSize;
+    termSize.row -= _prompt ? _prompt->lines() : 1;
+    return termSize;
 }
 
 Position Terminal::_getCursorPositionFromTerminal() {
@@ -97,46 +101,72 @@ T Terminal::_read() {
 void Terminal::refresh() {
     std::ostringstream bufToWrite;
     bufToWrite << escape::kHideCursor;
-    bufToWrite << escape::kHideCursor;
     bufToWrite << escape::kMoveCursorTo1x1;
 
     auto terminalSize = getTerminalSize();
     size_t lineNumber = 0;
-    auto line = _buffer->getLine(_scrollOffset.row);
 
-    for (lineNumber = 0; lineNumber <= terminalSize.row && line;
-         lineNumber++, line = _buffer->getLine(_scrollOffset.row + lineNumber)) {
+    for (lineNumber = 0; lineNumber <= terminalSize.row; ++lineNumber) {
+        auto line = _buffer->getLine(_scrollOffset.row + lineNumber);
+        if (line) {
+            auto it = line->begin();
+            size_t colCount = 0;
+            for (; colCount < _scrollOffset.column && it != line->end(); colCount++) {
+                ++it;
+            }
 
-        auto it = line->begin();
-        size_t colCount = 0;
-        for (; colCount < _scrollOffset.column && it != line->end(); colCount++) {
-            ++it;
+            for (; it != line->end() && colCount < terminalSize.column; ++it, ++colCount) {
+                auto ch = *it;
+                if (!isEOL(ch)) {
+                    bufToWrite << ch;
+                }
+            }
+        } else {
+            bufToWrite << "~"_sv;
         }
 
-        for (; it != line->end() && colCount < terminalSize.column; ++it, ++colCount) {
-            auto ch = *it;
-            if (!isEOL(ch)) {
-                bufToWrite << ch;
+        bufToWrite << escape::kEraseRestOfLine << "\r\n"_sv;
+    }
+
+    if (!_prompt) {
+        auto messageSize = std::min(_statusMessage.size(), terminalSize.column);
+        bufToWrite << _statusMessage.substr(0, messageSize);
+        bufToWrite << escape::kEraseRestOfLine;
+
+        const auto lineStatus =
+            " Row: {} Col: {} "_format(_virtualPosition.row + 1, _virtualPosition.column + 1);
+
+        if (terminalSize.column - messageSize > lineStatus.size()) {
+            bufToWrite << fmt::format(escape::kMoveCursorFmt,
+                                      terminalSize.row + 2,
+                                      terminalSize.column - lineStatus.size());
+            bufToWrite << lineStatus;
+        }
+
+        auto cursorPosition = getCursorPosition();
+        bufToWrite << fmt::format(
+            escape::kMoveCursorFmt, cursorPosition.row + 1, cursorPosition.column + 1);
+
+        bufToWrite << escape::kShowCursor;
+    } else {
+        for (size_t lineNumber = 0; lineNumber != _prompt->lines(); ++lineNumber) {
+            auto line = _prompt->getLine(lineNumber);
+            line = line.substr(0, std::min(line.size(), terminalSize.column));
+            bufToWrite << line << escape::kEraseRestOfLine;
+            if (lineNumber < _prompt->lines() - 1) {
+                bufToWrite << "\r\n";
             }
         }
 
-        bufToWrite << escape::kEraseRestOfLine;
-        if (lineNumber < terminalSize.row - 1) {
-            bufToWrite << "\r\n";
+        auto cursorPos = _prompt->cursorPosition();
+        cursorPos.row += terminalSize.row + 2;
+
+        bufToWrite << fmt::format(escape::kMoveCursorFmt, cursorPos.row, cursorPos.column + 1);
+        if (_prompt->showCursor()) {
+            bufToWrite << escape::kShowCursor;
         }
     }
 
-    for (; lineNumber <= terminalSize.row; lineNumber++) {
-        bufToWrite << "~" << escape::kEraseRestOfLine;
-        if (lineNumber < terminalSize.row - 1) {
-            bufToWrite << "\r\n";
-        }
-    }
-
-    auto cursorPosition = getCursorPosition();
-    bufToWrite << fmt::format(
-        escape::kMoveCursorFmt, cursorPosition.row + 1, cursorPosition.column + 1);
-    bufToWrite << escape::kShowCursor;
     write(bufToWrite.str());
 }
 
@@ -208,7 +238,6 @@ Position Terminal::getVirtualPosition() const {
 }
 
 void Terminal::moveCursor(Direction dir, size_t count) {
-    auto termSize = getTerminalSize();
     while (count > 0) {
         switch (dir) {
             case Direction::Up:
@@ -262,6 +291,7 @@ void Terminal::moveCursor(Direction dir, size_t count) {
                 break;
             }
         }
+        auto termSize = getTerminalSize();
 
         if (_virtualPosition.row < _scrollOffset.row) {
             _scrollOffset.row = _virtualPosition.row;
@@ -277,4 +307,16 @@ void Terminal::moveCursor(Direction dir, size_t count) {
 
         --count;
     }
+}
+
+void Terminal::setStatusMessage(std::string message) {
+    _statusMessage = std::move(message);
+}
+
+void Terminal::startPrompt(Prompt* prompt) {
+    _prompt = prompt;
+}
+
+void Terminal::endPrompt() {
+    _prompt = nullptr;
 }

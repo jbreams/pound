@@ -8,7 +8,7 @@
 
 #include "piecetable.h"
 
-PieceTable::PieceTable(stdx::string_view fileName) : _endIt(this, _pieces.end(), 0) {
+PieceTable::PieceTable(const std::string& fileName) : _endIt(this, _pieces.end(), 0) {
     _originalFile = ::open(fileName.data(), O_RDONLY);
     if (_originalFile == -1) {
         auto err = std::make_error_code(static_cast<std::errc>(errno));

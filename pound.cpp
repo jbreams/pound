@@ -5,13 +5,123 @@
 #include "pound.h"
 #include "terminal.h"
 
+class OneLinePrompt : public Prompt {
+public:
+    explicit OneLinePrompt(Terminal* term, std::string prompt)
+        : _term(term), _prompt(std::move(prompt)) {}
+
+    size_t lines() const override {
+        return 2;
+    }
+
+    stdx::string_view getLine(size_t lineNumber) const override {
+        if (lineNumber == 0) {
+            return _prompt;
+        } else if (lineNumber == 1) {
+            stdx::string_view res(_result);
+            return res.substr(_scrollOffset);
+        } else {
+            throw PoundException("Tried to read line {} from a one-line prompt"_format(lineNumber));
+        }
+    }
+
+    Position cursorPosition() const override {
+        return {1, _virtualOffset - _scrollOffset};
+    }
+
+    bool showCursor() const override {
+        return true;
+    }
+
+    void movePosition(Direction dir) {
+        switch (dir) {
+            case Direction::Left:
+                if (_virtualOffset > 0) {
+                    --_virtualOffset;
+                }
+                break;
+            case Direction::Right:
+                if (_virtualOffset < _result.size() + 1) {
+                    ++_virtualOffset;
+                }
+                break;
+            default:
+                throw PoundException("One-line prompts can only move the cursor left and right");
+        }
+
+        auto termSize = _term->getTerminalSize();
+        if (_virtualOffset < _scrollOffset) {
+            _scrollOffset = _virtualOffset;
+        } else if (_virtualOffset >= _scrollOffset + termSize.column) {
+            _scrollOffset = _virtualOffset - termSize.column + 1;
+        }
+    }
+
+    void insert(char ch) {
+        if (_virtualOffset > _result.size()) {
+            _result.push_back(ch);
+        } else {
+            _result.insert(_virtualOffset, 1, ch);
+        }
+    }
+
+    void erase() {
+        _result.erase(_virtualOffset);
+    }
+
+    const std::string& result() const {
+        return _result;
+    }
+
+    size_t virtualOffset() const {
+        return _virtualOffset;
+    }
+
+private:
+    Terminal* _term;
+    std::string _prompt;
+    std::string _result;
+    size_t _virtualOffset = 0;
+    size_t _scrollOffset = 0;
+};
+
+std::string doSaveAs(Terminal* term, PieceTable* buffer) {
+    auto prompt = std::make_unique<OneLinePrompt>(term, "Save file as:");
+    term->startPrompt(prompt.get());
+    term->refresh();
+    for (auto c = term->readKeyCode(); c != KeyCodes::kNewLine; c = term->readKeyCode()) {
+        if (c == KeyCodes::kArrowLeft) {
+            prompt->movePosition(Direction::Left);
+        } else if (c == KeyCodes::kArrowRight) {
+            prompt->movePosition(Direction::Right);
+        } else if (c == KeyCodes::kDelete) {
+            prompt->erase();
+        } else if (c == KeyCodes::kBackspace) {
+            if (prompt->virtualOffset() > 0) {
+                prompt->movePosition(Direction::Left);
+                prompt->erase();
+            }
+        } else if (c < KeyCodes::kSpecialKeyCodes && std::isprint(static_cast<char>(c))) {
+            prompt->movePosition(Direction::Right);
+            prompt->insert(static_cast<char>(c));
+        }
+        term->refresh();
+    }
+
+    term->endPrompt();
+    buffer->save(prompt->result());
+    term->setStatusMessage("Successfully saved {}"_format(prompt->result()));
+    return prompt->result();
+}
+
 int main(int argc, char** argv) try {
     std::unique_ptr<PieceTable> pieceTable;
+    stdx::optional<std::string> fileName;
     if (argc == 1) {
         pieceTable = std::make_unique<PieceTable>();
     } else {
-        stdx::string_view file(argv[1]);
-        pieceTable = std::make_unique<PieceTable>(file);
+        fileName = argv[1];
+        pieceTable = std::make_unique<PieceTable>(*fileName);
     }
 
     Terminal term(pieceTable.get());
@@ -77,7 +187,13 @@ int main(int argc, char** argv) try {
                 pieceTable->erase(terminalPosToBufferPos());
             }
         } else if (c == modCtrlKey('s')) {
-            pieceTable->save("newfile");
+            if (fileName) {
+                pieceTable->save(*fileName);
+            } else {
+                fileName = doSaveAs(&term, pieceTable.get());
+            }
+        } else if (c == modCtrlKey('w')) {
+            doSaveAs(&term, pieceTable.get());
         } else if (c < KeyCodes::kSpecialKeyCodes &&
                    (std::isprint(static_cast<char>(c)) || c == KeyCodes::kNewLine)) {
             pieceTable->insert(terminalPosToBufferPos(), static_cast<char>(c));

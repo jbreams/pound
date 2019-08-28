@@ -59,7 +59,7 @@ public:
         size_t _off = 0;
     };
 
-    explicit PieceTable(stdx::string_view fileName);
+    explicit PieceTable(const std::string& fileName);
     PieceTable();
     ~PieceTable();
 

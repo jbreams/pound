@@ -73,6 +73,18 @@ constexpr auto kSwitchToMainScreen = "\x1b[?1049l"_sv;
 constexpr auto kMoveCursorFmt = "\x1b[{0:d};{1:d}H"_sv;
 }  // namespace escape
 
+class Prompt {
+public:
+    POUND_NON_COPYABLE_NON_MOVABLE(Prompt);
+    Prompt() = default;
+    virtual ~Prompt() = default;
+
+    virtual size_t lines() const = 0;
+    virtual stdx::string_view getLine(size_t line) const = 0;
+    virtual Position cursorPosition() const = 0;
+    virtual bool showCursor() const = 0;
+};
+
 class Terminal {
 public:
     explicit Terminal(PieceTable* buffer);
@@ -107,6 +119,10 @@ public:
 
     void refresh();
 
+    void setStatusMessage(std::string message);
+    void startPrompt(Prompt* prompt);
+    void endPrompt();
+
 private:
     Position _getCursorPositionFromTerminal();
     template <typename T>
@@ -120,4 +136,7 @@ private:
     stdx::optional<Position> _terminalSize;
     Position _scrollOffset;
     Position _virtualPosition;
+
+    std::string _statusMessage;
+    Prompt* _prompt = nullptr;
 };
