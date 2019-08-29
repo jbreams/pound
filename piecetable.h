@@ -29,10 +29,19 @@ public:
     class Line;
     class iterator {
     public:
+        typedef ssize_t difference_type;
+        typedef char value_type;
+        typedef value_type* pointer;
+        typedef value_type& reference;
+        typedef const value_type& const_reference;
+        typedef std::bidirectional_iterator_tag iterator_category;
+
         iterator() = default;
-        char operator*() const;
+        const_reference& operator*() const;
         iterator& operator++();
         iterator& operator--();
+        iterator operator--(int);
+        iterator operator++(int);
 
         friend bool operator==(const iterator& a, const iterator& b) {
             if (!a._isValid() && !b._isValid()) {
@@ -65,6 +74,7 @@ public:
 
     POUND_NON_COPYABLE_NON_MOVABLE(PieceTable);
 
+    bool dirty() const;
     void save(const std::string& name);
 
     class Line {
@@ -128,6 +138,7 @@ private:
     Line _findEOL(iterator begin);
     iterator _eraseImpl(const iterator& it);
 
+    bool _dirty = false;
     size_t _sizeTracker = 0;
     PieceSet _pieces;
 

@@ -60,7 +60,7 @@ bool PieceTable::iterator::_isValid() const {
     return _table && _it != _table->_pieces.end();
 }
 
-char PieceTable::iterator::operator*() const {
+PieceTable::iterator::const_reference PieceTable::iterator::operator*() const {
     if (!_isValid()) {
         throw PoundException("Cannot dereference invalid piece table iterator");
     }
@@ -109,6 +109,18 @@ PieceTable::iterator& PieceTable::iterator::operator--() {
     return *this;
 }
 
+PieceTable::iterator PieceTable::iterator::operator--(int) {
+    auto ret = *this;
+    --(*this);
+    return ret;
+}
+
+PieceTable::iterator PieceTable::iterator::operator++(int) {
+    auto ret = *this;
+    ++(*this);
+    return ret;
+}
+
 PieceTable::iterator PieceTable::begin() {
     return iterator(this, _pieces.begin(), 0);
 }
@@ -136,8 +148,9 @@ PieceTable::iterator PieceTable::insert(const PieceTable::iterator& extIt, char 
     _addBuffer.push_back(ch);
     Piece toInsert{Piece::AddBuffer, _addBuffer.size() - 1, 1};
     _lineCache.clear();
+    _dirty = true;
 
-    auto isTrivialAppend = (!isEOL(ch)) && (it->type == Piece::AddBuffer) &&
+    auto isTrivialAppend = (it->type == Piece::AddBuffer) &&
         (it->start + it->length == _addBuffer.size() - 1) &&
         ((offsetWithinPiece == it->length || it->length == 0));
     if (isTrivialAppend) {
@@ -179,6 +192,7 @@ PieceTable::iterator PieceTable::_eraseImpl(const iterator& extIt) {
     auto isTrivialErase = (it->type == Piece::AddBuffer) && (it->length > 0) &&
         (it->start + it->length == _addBuffer.size()) && (offsetWithinPiece == it->length);
     _sizeTracker--;
+    _dirty = true;
     if (isTrivialErase) {
         it->length--;
         _addBuffer.pop_back();
@@ -337,4 +351,10 @@ void PieceTable::save(const std::string& file) {
         throw PoundException(
             "Error renaming temp file {} to {} while trying to save"_format(fullFileName, file));
     }
+
+    _dirty = false;
+}
+
+bool PieceTable::dirty() const {
+    return _dirty;
 }

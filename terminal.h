@@ -73,13 +73,13 @@ constexpr auto kSwitchToMainScreen = "\x1b[?1049l"_sv;
 constexpr auto kMoveCursorFmt = "\x1b[{0:d};{1:d}H"_sv;
 }  // namespace escape
 
-class Prompt {
+class Buffer {
 public:
-    POUND_NON_COPYABLE_NON_MOVABLE(Prompt);
-    Prompt() = default;
-    virtual ~Prompt() = default;
+    POUND_NON_COPYABLE_NON_MOVABLE(Buffer);
+    Buffer() = default;
+    virtual ~Buffer() = default;
 
-    virtual size_t lines() const = 0;
+    virtual size_t lineAllocation() const = 0;
     virtual stdx::string_view getLine(size_t line) const = 0;
     virtual Position cursorPosition() const = 0;
     virtual bool showCursor() const = 0;
@@ -92,10 +92,6 @@ public:
     POUND_NON_COPYABLE_NON_MOVABLE(Terminal);
 
     ~Terminal();
-
-    void setLineFactory(PieceTable* buffer) {
-        _buffer = buffer;
-    }
 
     KeyCodes readKeyCode();
 
@@ -113,6 +109,7 @@ public:
     }
 
     Position getCursorPosition() const;
+    void setVirtualPosition(Position pos);
     Position getVirtualPosition() const;
     void moveCursor(Direction dir, size_t count = 1);
     Position getTerminalSize(bool refreshFromTerminal = false);
@@ -120,7 +117,7 @@ public:
     void refresh();
 
     void setStatusMessage(std::string message);
-    void startPrompt(Prompt* prompt);
+    void startPrompt(Buffer* prompt);
     void endPrompt();
 
 private:
@@ -131,6 +128,8 @@ private:
     template <typename T = char>
     T _read();
 
+    void _fixScrollOffset();
+
     PieceTable* _buffer;
     termios _oldMode;
     stdx::optional<Position> _terminalSize;
@@ -138,5 +137,5 @@ private:
     Position _virtualPosition;
 
     std::string _statusMessage;
-    Prompt* _prompt = nullptr;
+    Buffer* _prompt = nullptr;
 };

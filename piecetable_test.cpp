@@ -175,7 +175,7 @@ TEST_CASE("ReverseIterator", "[PieceTable]") {
 }
 
 TEST_CASE("Lines", "[PieceTable]") {
-    TempFile testFile("abc\ndef\n\nghi");
+    TempFile testFile("abc\ndef\n\nghi\nfoobarbizzbuzz");
     PieceTable table(testFile.path);
 
     testContents(table, testFile.contents);
@@ -199,7 +199,21 @@ TEST_CASE("Lines", "[PieceTable]") {
     line = table.getLine(2);
     REQUIRE(line);
     REQUIRE(dumpLine(*line) == "ghi");
+
     line = table.getLine(3);
+    REQUIRE(line);
+    std::regex regex("barbizz");
+    using RegexIterator = std::regex_iterator<PieceTable::iterator>;
+    auto regexBegin = RegexIterator(line->begin(), line->end(), regex);
+    auto regexEnd = RegexIterator();
+    REQUIRE(regexBegin != regexEnd);
+    REQUIRE(regexBegin->position() == 3);
+    REQUIRE(regexBegin->length() == 7);
+    REQUIRE(regexBegin->str() == "barbizz");
+    ++regexBegin;
+    REQUIRE(regexBegin == regexEnd);
+
+    line = table.getLine(4);
     REQUIRE(!line);
 
     line = table.getLine(1);

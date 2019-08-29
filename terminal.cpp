@@ -33,7 +33,7 @@ Terminal::~Terminal() {
 Position Terminal::getTerminalSize(bool refreshFromTerminal) {
     if (!refreshFromTerminal && _terminalSize) {
         auto termSize = *_terminalSize;
-        termSize.row -= _prompt ? _prompt->lines() : 1;
+        termSize.row -= _prompt ? _prompt->lineAllocation() : 1;
         return termSize;
     }
 
@@ -46,7 +46,7 @@ Position Terminal::getTerminalSize(bool refreshFromTerminal) {
     }
 
     auto termSize = *_terminalSize;
-    termSize.row -= _prompt ? _prompt->lines() : 1;
+    termSize.row -= _prompt ? _prompt->lineAllocation() : 1;
     return termSize;
 }
 
@@ -149,11 +149,11 @@ void Terminal::refresh() {
 
         bufToWrite << escape::kShowCursor;
     } else {
-        for (size_t lineNumber = 0; lineNumber != _prompt->lines(); ++lineNumber) {
+        for (size_t lineNumber = 0; lineNumber != _prompt->lineAllocation(); ++lineNumber) {
             auto line = _prompt->getLine(lineNumber);
             line = line.substr(0, std::min(line.size(), terminalSize.column));
             bufToWrite << line << escape::kEraseRestOfLine;
-            if (lineNumber < _prompt->lines() - 1) {
+            if (lineNumber < _prompt->lineAllocation() - 1) {
                 bufToWrite << "\r\n";
             }
         }
@@ -291,21 +291,30 @@ void Terminal::moveCursor(Direction dir, size_t count) {
                 break;
             }
         }
-        auto termSize = getTerminalSize();
 
-        if (_virtualPosition.row < _scrollOffset.row) {
-            _scrollOffset.row = _virtualPosition.row;
-        } else if (_virtualPosition.row >= _scrollOffset.row + termSize.row) {
-            _scrollOffset.row = _virtualPosition.row - termSize.row + 1;
-        }
-
-        if (_virtualPosition.column < _scrollOffset.column) {
-            _scrollOffset.column = _virtualPosition.column;
-        } else if (_virtualPosition.column >= _scrollOffset.column + termSize.column) {
-            _scrollOffset.column = _virtualPosition.column - termSize.column + 1;
-        }
-
+        _fixScrollOffset();
         --count;
+    }
+}
+
+void Terminal::setVirtualPosition(Position pos) {
+    _virtualPosition = pos;
+    _fixScrollOffset();
+}
+
+void Terminal::_fixScrollOffset() {
+    auto termSize = getTerminalSize();
+
+    if (_virtualPosition.row < _scrollOffset.row) {
+        _scrollOffset.row = _virtualPosition.row;
+    } else if (_virtualPosition.row >= _scrollOffset.row + termSize.row) {
+        _scrollOffset.row = _virtualPosition.row - termSize.row + 1;
+    }
+
+    if (_virtualPosition.column < _scrollOffset.column) {
+        _scrollOffset.column = _virtualPosition.column;
+    } else if (_virtualPosition.column >= _scrollOffset.column + termSize.column) {
+        _scrollOffset.column = _virtualPosition.column - termSize.column + 1;
     }
 }
 
@@ -313,7 +322,7 @@ void Terminal::setStatusMessage(std::string message) {
     _statusMessage = std::move(message);
 }
 
-void Terminal::startPrompt(Prompt* prompt) {
+void Terminal::startPrompt(Buffer* prompt) {
     _prompt = prompt;
 }
 

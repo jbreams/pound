@@ -14,6 +14,7 @@ add_subdirectory(third_party)
 add_executable(pound
     pound.cpp
     piecetable.cpp
+    prompt.cpp
     terminal.cpp
 )
 
