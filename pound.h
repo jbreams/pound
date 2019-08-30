@@ -8,6 +8,16 @@
 #include "nonstd/string_view.hpp"
 #include "tl/optional.hpp"
 
+#define POUND_NON_COPYABLE(className)     \
+    className(const className&) = delete; \
+    className& operator=(const className&) = delete
+#define POUND_NON_MOVABLE(className) \
+    className(className&&) = delete; \
+    className& operator=(className&&) = delete
+#define POUND_NON_COPYABLE_NON_MOVABLE(className) \
+    POUND_NON_COPYABLE(className);                \
+    POUND_NON_MOVABLE(className)
+
 using namespace nonstd::string_view_literals;
 using namespace fmt::literals;
 
@@ -65,13 +75,3 @@ struct Position {
 };
 
 enum class Direction { Up, Down, Left, Right };
-
-#define POUND_NON_COPYABLE(className)     \
-    className(const className&) = delete; \
-    className& operator=(const className&) = delete
-#define POUND_NON_MOVABLE(className) \
-    className(className&&) = delete; \
-    className& operator=(className&&) = delete
-#define POUND_NON_COPYABLE_NON_MOVABLE(className) \
-    POUND_NON_COPYABLE(className);                \
-    POUND_NON_MOVABLE(className)

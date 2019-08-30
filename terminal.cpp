@@ -9,7 +9,7 @@
 #include "piecetable.h"
 #include "terminal.h"
 
-Terminal::Terminal(PieceTable* buffer) : _buffer(buffer) {
+Terminal::Terminal(Buffer* buffer) : _buffer(buffer) {
     if (!::isatty(STDIN_FILENO)) {
         throw PoundException("stdin is not a terminal");
     }
@@ -23,6 +23,10 @@ Terminal::Terminal(PieceTable* buffer) : _buffer(buffer) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
     _terminalSize = getTerminalSize();
     write(escape::kSwitchToAlternateScreen);
+
+    Position bufferAllocation = getTerminalSize();
+    bufferAllocation.row -= 1;
+    _buffer->setAllocation(bufferAllocation);
 }
 
 Terminal::~Terminal() {
@@ -33,7 +37,7 @@ Terminal::~Terminal() {
 Position Terminal::getTerminalSize(bool refreshFromTerminal) {
     if (!refreshFromTerminal && _terminalSize) {
         auto termSize = *_terminalSize;
-        termSize.row -= _prompt ? _prompt->lineAllocation() : 1;
+        termSize.row -= _prompt ? _prompt->allocation().row : 1;
         return termSize;
     }
 
@@ -46,7 +50,7 @@ Position Terminal::getTerminalSize(bool refreshFromTerminal) {
     }
 
     auto termSize = *_terminalSize;
-    termSize.row -= _prompt ? _prompt->lineAllocation() : 1;
+    termSize.row -= _prompt ? _prompt->allocation().row : 1;
     return termSize;
 }
 
@@ -107,14 +111,10 @@ void Terminal::refresh() {
     size_t lineNumber = 0;
 
     for (lineNumber = 0; lineNumber <= terminalSize.row; ++lineNumber) {
-        auto line = _buffer->getLine(_scrollOffset.row + lineNumber);
+        auto line = _buffer->getLine(lineNumber);
         if (line) {
             auto it = line->begin();
             size_t colCount = 0;
-            for (; colCount < _scrollOffset.column && it != line->end(); colCount++) {
-                ++it;
-            }
-
             for (; it != line->end() && colCount < terminalSize.column; ++it, ++colCount) {
                 auto ch = *it;
                 if (!isEOL(ch)) {
@@ -133,8 +133,9 @@ void Terminal::refresh() {
         bufToWrite << _statusMessage.substr(0, messageSize);
         bufToWrite << escape::kEraseRestOfLine;
 
+        auto virtualPosition = _buffer->virtualPosition();
         const auto lineStatus =
-            " Row: {} Col: {} "_format(_virtualPosition.row + 1, _virtualPosition.column + 1);
+            " Row: {} Col: {} "_format(virtualPosition.row + 1, virtualPosition.column + 1);
 
         if (terminalSize.column - messageSize > lineStatus.size()) {
             bufToWrite << fmt::format(escape::kMoveCursorFmt,
@@ -143,17 +144,20 @@ void Terminal::refresh() {
             bufToWrite << lineStatus;
         }
 
-        auto cursorPosition = getCursorPosition();
+        auto cursorPosition = _buffer->cursorPosition();
         bufToWrite << fmt::format(
             escape::kMoveCursorFmt, cursorPosition.row + 1, cursorPosition.column + 1);
 
         bufToWrite << escape::kShowCursor;
     } else {
-        for (size_t lineNumber = 0; lineNumber != _prompt->lineAllocation(); ++lineNumber) {
+        for (size_t lineNumber = 0; lineNumber != _prompt->allocation().row; ++lineNumber) {
             auto line = _prompt->getLine(lineNumber);
-            line = line.substr(0, std::min(line.size(), terminalSize.column));
-            bufToWrite << line << escape::kEraseRestOfLine;
-            if (lineNumber < _prompt->lineAllocation() - 1) {
+            auto it = line->begin();
+            for (size_t col = 0; col < terminalSize.column && it != line->end(); ++col, ++it) {
+                bufToWrite << *it;
+            }
+            bufToWrite << escape::kEraseRestOfLine;
+            if (lineNumber < _prompt->allocation().row - 1) {
                 bufToWrite << "\r\n";
             }
         }
@@ -228,104 +232,22 @@ KeyCodes Terminal::readKeyCode() {
     return KeyCodes::kEscape;
 }
 
-Position Terminal::getCursorPosition() const {
-    return {_virtualPosition.row - _scrollOffset.row,
-            _virtualPosition.column - _scrollOffset.column};
-}
-
-Position Terminal::getVirtualPosition() const {
-    return _virtualPosition;
-}
-
-void Terminal::moveCursor(Direction dir, size_t count) {
-    while (count > 0) {
-        switch (dir) {
-            case Direction::Up:
-                if (_virtualPosition.row > 0) {
-                    _virtualPosition.row--;
-                    auto line = _buffer->getLine(_virtualPosition.row);
-                    if (!line) {
-                        throw PoundException(
-                            "Could not find line at {}"_format(_virtualPosition.row));
-                    }
-                    _virtualPosition.column = std::min(_virtualPosition.column, line->size());
-                }
-                break;
-            case Direction::Down: {
-                auto nextLine = _buffer->getLine(_virtualPosition.row + 1);
-                if (nextLine) {
-                    _virtualPosition.row++;
-                    _virtualPosition.column = std::min(_virtualPosition.column, nextLine->size());
-                }
-                break;
-            }
-            case Direction::Left:
-                if (_virtualPosition.column > 0) {
-                    _virtualPosition.column--;
-                } else if (_virtualPosition.row > 0) {
-                    _virtualPosition.row--;
-                    auto prevLine = _buffer->getLine(_virtualPosition.row);
-                    if (!prevLine) {
-                        throw PoundException(
-                            "Could not find line at {}"_format(_virtualPosition.row));
-                    }
-                    _virtualPosition.column = prevLine->size();
-                }
-                break;
-            case Direction::Right: {
-                auto line = _buffer->getLine(_virtualPosition.row);
-                if (!line) {
-                    throw PoundException(
-                        "Could not find current line at {}"_format(_virtualPosition.row));
-                }
-
-                if (_virtualPosition.column < line->size()) {
-                    _virtualPosition.column++;
-                    break;
-                }
-                auto nextLine = _buffer->getLine(_virtualPosition.row + 1);
-                if (nextLine) {
-                    _virtualPosition.row++;
-                    _virtualPosition.column = 0;
-                }
-                break;
-            }
-        }
-
-        _fixScrollOffset();
-        --count;
-    }
-}
-
-void Terminal::setVirtualPosition(Position pos) {
-    _virtualPosition = pos;
-    _fixScrollOffset();
-}
-
-void Terminal::_fixScrollOffset() {
-    auto termSize = getTerminalSize();
-
-    if (_virtualPosition.row < _scrollOffset.row) {
-        _scrollOffset.row = _virtualPosition.row;
-    } else if (_virtualPosition.row >= _scrollOffset.row + termSize.row) {
-        _scrollOffset.row = _virtualPosition.row - termSize.row + 1;
-    }
-
-    if (_virtualPosition.column < _scrollOffset.column) {
-        _scrollOffset.column = _virtualPosition.column;
-    } else if (_virtualPosition.column >= _scrollOffset.column + termSize.column) {
-        _scrollOffset.column = _virtualPosition.column - termSize.column + 1;
-    }
-}
-
 void Terminal::setStatusMessage(std::string message) {
     _statusMessage = std::move(message);
 }
 
 void Terminal::startPrompt(Buffer* prompt) {
     _prompt = prompt;
+    auto lineRequest = _prompt->allocationRequest().row;
+    _prompt->setAllocation({lineRequest, std::numeric_limits<size_t>::max()});
+    auto bufferAllocation = getTerminalSize();
+    bufferAllocation.row -= lineRequest;
+    _buffer->setAllocation(bufferAllocation);
 }
 
 void Terminal::endPrompt() {
     _prompt = nullptr;
+    auto bufferAllocation = getTerminalSize();
+    bufferAllocation.row -= 1;
+    _buffer->setAllocation(bufferAllocation);
 }

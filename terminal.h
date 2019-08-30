@@ -73,21 +73,9 @@ constexpr auto kSwitchToMainScreen = "\x1b[?1049l"_sv;
 constexpr auto kMoveCursorFmt = "\x1b[{0:d};{1:d}H"_sv;
 }  // namespace escape
 
-class Buffer {
-public:
-    POUND_NON_COPYABLE_NON_MOVABLE(Buffer);
-    Buffer() = default;
-    virtual ~Buffer() = default;
-
-    virtual size_t lineAllocation() const = 0;
-    virtual stdx::string_view getLine(size_t line) const = 0;
-    virtual Position cursorPosition() const = 0;
-    virtual bool showCursor() const = 0;
-};
-
 class Terminal {
 public:
-    explicit Terminal(PieceTable* buffer);
+    explicit Terminal(Buffer* buffer);
 
     POUND_NON_COPYABLE_NON_MOVABLE(Terminal);
 
@@ -108,10 +96,6 @@ public:
         return write(stdx::string_view(val));
     }
 
-    Position getCursorPosition() const;
-    void setVirtualPosition(Position pos);
-    Position getVirtualPosition() const;
-    void moveCursor(Direction dir, size_t count = 1);
     Position getTerminalSize(bool refreshFromTerminal = false);
 
     void refresh();
@@ -128,14 +112,10 @@ private:
     template <typename T = char>
     T _read();
 
-    void _fixScrollOffset();
-
-    PieceTable* _buffer;
     termios _oldMode;
     stdx::optional<Position> _terminalSize;
-    Position _scrollOffset;
-    Position _virtualPosition;
 
+    Buffer* _buffer;
     std::string _statusMessage;
     Buffer* _prompt = nullptr;
 };

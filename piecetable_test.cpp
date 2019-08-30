@@ -10,10 +10,10 @@ void dumpTable(PieceTable& table) {
     for (const auto& piece : table.table()) {
         stdx::string_view contents;
         switch (piece.type) {
-            case PieceTable::Piece::Original:
+            case PieceTable::Piece::kOriginal:
                 contents = table.originalFileView().substr(piece.start, piece.length);
                 break;
-            case PieceTable::Piece::AddBuffer:
+            case PieceTable::Piece::kAddBuffer:
                 contents = stdx::string_view(table.addBuffer()).substr(piece.start, piece.length);
                 break;
         }
@@ -37,7 +37,7 @@ void testContents(PieceTable& table, stdx::string_view match) {
     REQUIRE(str == match);
 }
 
-std::string dumpLine(const PieceTable::Line& line) {
+std::string dumpLine(const Line& line) {
     std::string out;
     std::copy(line.begin(), line.end(), std::back_inserter(out));
     REQUIRE(out.size() == line.size());

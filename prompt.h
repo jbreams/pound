@@ -6,31 +6,56 @@
 
 class OneLinePrompt : public Buffer {
 public:
-    explicit OneLinePrompt(Terminal* term, std::string prompt)
-        : _term(term), _prompt(std::move(prompt)) {
-        _term->startPrompt(this);
+    explicit OneLinePrompt(std::string prompt) : _storage(std::move(prompt)) {}
+
+    // By default documents requests the absolute maximum number of rows/cols
+    Position allocationRequest() const override {
+        return {2, std::numeric_limits<size_t>::max()};
     }
 
-    ~OneLinePrompt() {
-        _term->endPrompt();
-    }
-
-    size_t lineAllocation() const override;
-    stdx::string_view getLine(size_t lineNumber) const override;
+    stdx::optional<Line> getLine(size_t lineNumber) override;
     Position cursorPosition() const override;
+    Position virtualPosition() const override {
+        return {1, virtualOffset()};
+    }
     bool showCursor() const override;
 
     void movePosition(Direction dir);
     void insert(char ch);
     void erase();
-    const std::string& result() const;
+    std::string& result();
     size_t virtualOffset() const;
     void updatePrompt(std::string prompt);
 
 private:
-    Terminal* _term;
-    std::string _prompt;
-    std::string _result;
+    struct PromptStorage : public BufferStorage {
+    public:
+        PromptStorage(std::string prompt);
+
+        class IteratorImpl;
+
+        stdx::optional<Line> getLine(size_t lineNumber) override;
+
+        std::string* result() {
+            return &_result;
+        }
+
+        Iterator begin() override;
+        const Iterator& end() const override {
+            return _endIt;
+        }
+
+        void updatePrompt(std::string prompt) {
+            _prompt = std::move(prompt);
+        }
+
+    private:
+        std::string _prompt;
+        std::string _result;
+        Iterator _endIt;
+    };
+
+    PromptStorage _storage;
     size_t _virtualOffset = 0;
     size_t _scrollOffset = 0;
 };

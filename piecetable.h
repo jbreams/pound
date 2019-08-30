@@ -7,14 +7,16 @@
 
 #include "pound.h"
 
+#include "buffer.h"
+
 inline constexpr bool isEOL(char ch) {
     return ch == '\r' || ch == '\n';
 }
 
-class PieceTable {
+class PieceTable : public BufferStorage {
 public:
     struct Piece {
-        enum Type { Original, AddBuffer };
+        enum Type { kOriginal, kAddBuffer };
         Piece(Type type_, size_t start_, size_t length_)
             : type(type_), start(start_), length(length_) {}
 
@@ -26,40 +28,22 @@ public:
     using PieceSet = std::list<Piece>;
     using PieceIterator = PieceSet::iterator;
 
-    class Line;
-    class iterator {
+    class IteratorImpl : public Iterator::IteratorBase {
     public:
-        typedef ssize_t difference_type;
-        typedef char value_type;
-        typedef value_type* pointer;
-        typedef value_type& reference;
-        typedef const value_type& const_reference;
-        typedef std::bidirectional_iterator_tag iterator_category;
+        IteratorImpl(const PieceTable* table, PieceIterator it, size_t off)
+            : _table(table), _it(std::move(it)), _off(off) {}
 
-        iterator() = default;
-        const_reference& operator*() const;
-        iterator& operator++();
-        iterator& operator--();
-        iterator operator--(int);
-        iterator operator++(int);
+    protected:
+        using const_reference = IteratorBase::const_reference;
 
-        friend bool operator==(const iterator& a, const iterator& b) {
-            if (!a._isValid() && !b._isValid()) {
-                return true;
-            }
-
-            return (a._table == b._table) && (a._it == b._it) && (a._off == b._off);
-        }
-
-        friend bool operator!=(const iterator& a, const iterator& b) {
-            return !(a == b);
-        }
+        void increment() override;
+        void decrement() override;
+        const_reference dereference() const override;
+        bool equals(const IteratorBase* other) const override;
+        std::unique_ptr<IteratorBase> clone() const override;
 
     private:
         friend class PieceTable;
-        friend class PieceTable::Line;
-        iterator(const PieceTable* table, PieceIterator it, size_t off)
-            : _table(table), _it(std::move(it)), _off(off) {}
 
         bool _isValid() const;
 
@@ -67,6 +51,8 @@ public:
         PieceIterator _it;
         size_t _off = 0;
     };
+
+    using iterator = BufferStorage::Iterator;
 
     explicit PieceTable(const std::string& fileName);
     PieceTable();
@@ -77,42 +63,10 @@ public:
     bool dirty() const;
     void save(const std::string& name);
 
-    class Line {
-    public:
-        const iterator& begin() const {
-            return _begin;
-        }
+    stdx::optional<Line> getLine(size_t lineNumber) override;
 
-        const iterator& end() const {
-            return _end;
-        }
-
-        const iterator& nextLine() const {
-            return _nextLine;
-        }
-
-        size_t size() const {
-            return _size;
-        }
-
-    private:
-        friend class PieceTable;
-        Line(iterator begin, iterator end, iterator nextLine, size_t size)
-            : _begin(std::move(begin)),
-              _end(std::move(end)),
-              _nextLine(std::move(nextLine)),
-              _size(size) {}
-
-        iterator _begin;
-        iterator _end;
-        iterator _nextLine;
-        size_t _size;
-    };
-
-    stdx::optional<Line> getLine(size_t lineNumber);
-
-    iterator begin();
-    const iterator& end() const;
+    iterator begin() override;
+    const iterator& end() const override;
 
     size_t size() const;
 
@@ -133,17 +87,19 @@ public:
     }
 
 private:
+    const IteratorImpl* _itToImpl(const iterator& it);
     off_t _seekOriginal(off_t offset, int whence);
-    Line _makeLine(const Line& start);
     Line _findEOL(iterator begin);
     iterator _eraseImpl(const iterator& it);
+    iterator _insertImpl(const iterator& it, char ch);
+    std::pair<PieceIterator, PieceIterator> _splitAt(iterator it);
 
     bool _dirty = false;
     size_t _sizeTracker = 0;
     PieceSet _pieces;
 
     const iterator _endIt;
-    int _originalFile;
+    int _originalFile = -1;
     char* _originalFileMapping = nullptr;
     stdx::string_view _originalFileView;
 

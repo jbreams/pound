@@ -8,12 +8,12 @@
 
 #include "piecetable.h"
 
-PieceTable::PieceTable(const std::string& fileName) : _endIt(this, _pieces.end(), 0) {
+PieceTable::PieceTable(const std::string& fileName) : _endIt(IteratorImpl(this, _pieces.end(), 0)) {
     _originalFile = ::open(fileName.data(), O_RDONLY);
     if (_originalFile == -1) {
         auto err = std::make_error_code(static_cast<std::errc>(errno));
         if (err == std::errc::no_such_file_or_directory) {
-            _pieces.emplace_front(Piece::AddBuffer, 0, 0);
+            _pieces.emplace_front(Piece::kAddBuffer, 0, 0);
             return;
         }
         throw PoundException("Error opening file {}"_format(fileName), err);
@@ -35,10 +35,10 @@ PieceTable::PieceTable(const std::string& fileName) : _endIt(this, _pieces.end()
     }
     _originalFileView = stdx::string_view(_originalFileMapping, originalFileSize);
     _sizeTracker = originalFileSize;
-    _pieces.emplace_back(Piece{Piece::Original, 0, originalFileSize});
+    _pieces.emplace_back(Piece{Piece::kOriginal, 0, originalFileSize});
 }
 
-PieceTable::PieceTable() : _endIt(this, _pieces.end(), 0) {}
+PieceTable::PieceTable() : _endIt(IteratorImpl(this, _pieces.end(), 0)) {}
 
 PieceTable::~PieceTable() {
     if (_originalFile != -1) {
@@ -56,45 +56,42 @@ size_t PieceTable::size() const {
     return _sizeTracker;
 }
 
-bool PieceTable::iterator::_isValid() const {
+bool PieceTable::IteratorImpl::_isValid() const {
     return _table && _it != _table->_pieces.end();
 }
 
-PieceTable::iterator::const_reference PieceTable::iterator::operator*() const {
+PieceTable::IteratorImpl::const_reference PieceTable::IteratorImpl::dereference() const {
     if (!_isValid()) {
         throw PoundException("Cannot dereference invalid piece table iterator");
     }
 
     switch (_it->type) {
-        case Piece::AddBuffer:
+        case Piece::kAddBuffer:
             return _table->_addBuffer.at(_it->start + _off);
-        case Piece::Original:
+        case Piece::kOriginal:
             return _table->_originalFileView.at(_it->start + _off);
     }
 }
 
-PieceTable::iterator& PieceTable::iterator::operator++() {
+void PieceTable::IteratorImpl::increment() {
     if (!_isValid()) {
-        throw PoundException("Cannot advance invalid piece table iterator");
+        throw PoundException("Cannot increment invalid piece table iterator");
     }
 
-    _off++;
+    ++_off;
     if (_off == _it->length) {
-        _it++;
+        ++_it;
         _off = 0;
     }
-
-    return *this;
 }
 
-PieceTable::iterator& PieceTable::iterator::operator--() {
+void PieceTable::IteratorImpl::decrement() {
+    if (!_table) {
+        throw PoundException("Cannot decrement invalid piece table iterator");
+    }
     if (_it == _table->_pieces.end() && !_table->_pieces.empty()) {
         --_it;
         _off = _it->length;
-    }
-
-    if (!_isValid()) {
-        throw PoundException("Cannot decrement invalid piece table iterator");
     }
 
     if (_off == 0) {
@@ -103,78 +100,33 @@ PieceTable::iterator& PieceTable::iterator::operator--() {
             _off = _it->length - 1;
         }
     } else {
-        _off--;
+        --_off;
     }
-
-    return *this;
 }
 
-PieceTable::iterator PieceTable::iterator::operator--(int) {
-    auto ret = *this;
-    --(*this);
-    return ret;
+bool PieceTable::IteratorImpl::equals(const BufferStorage::Iterator::IteratorBase* otherPtr) const {
+    const auto& other = *(static_cast<const IteratorImpl*>(otherPtr));
+    return _table == other._table && _it == other._it && _off == other._off;
 }
 
-PieceTable::iterator PieceTable::iterator::operator++(int) {
-    auto ret = *this;
-    ++(*this);
-    return ret;
+std::unique_ptr<BufferStorage::Iterator::IteratorBase> PieceTable::IteratorImpl::clone() const {
+    return std::make_unique<IteratorImpl>(_table, _it, _off);
 }
 
 PieceTable::iterator PieceTable::begin() {
-    return iterator(this, _pieces.begin(), 0);
+    return IteratorImpl(this, _pieces.begin(), 0);
 }
 
 const PieceTable::iterator& PieceTable::end() const {
     return _endIt;
 }
 
-PieceTable::iterator PieceTable::insert(const PieceTable::iterator& extIt, char ch) {
-    auto it = extIt._it;
-    auto offsetWithinPiece = extIt._off;
-    if (it == _pieces.end()) {
-        --it;
-        if (it == _pieces.end()) {
-            it = _pieces.emplace(_pieces.end(), Piece{Piece::AddBuffer, 0, 0});
-        }
-        offsetWithinPiece = it->length;
-    } else if (!extIt._isValid()) {
-        throw PoundException("Trying to insert character with invalid iterator");
+const PieceTable::IteratorImpl* PieceTable::_itToImpl(const iterator& it) {
+    auto ptr = static_cast<const IteratorImpl*>(it.impl());
+    if (!ptr) {
+        ptr = static_cast<const IteratorImpl*>(_endIt.impl());
     }
-
-    PieceIterator retIt;
-    size_t retOffset = 0;
-
-    _addBuffer.push_back(ch);
-    Piece toInsert{Piece::AddBuffer, _addBuffer.size() - 1, 1};
-    _lineCache.clear();
-    _dirty = true;
-
-    auto isTrivialAppend = (it->type == Piece::AddBuffer) &&
-        (it->start + it->length == _addBuffer.size() - 1) &&
-        ((offsetWithinPiece == it->length || it->length == 0));
-    if (isTrivialAppend) {
-        it->length++;
-        retIt = it;
-        retOffset = it->length - 1;
-    } else {
-        auto splitLength = it->length - offsetWithinPiece;
-        auto next = it;
-        ++next;
-        if (splitLength == 0) {
-            retIt = _pieces.emplace(next, toInsert);
-        } else if (splitLength < it->length) {
-            next =
-                _pieces.emplace(next, Piece{it->type, it->start + offsetWithinPiece, splitLength});
-            it->length -= splitLength;
-            retIt = _pieces.emplace(next, toInsert);
-        } else if (splitLength == it->length) {
-            retIt = _pieces.emplace(it, toInsert);
-        }
-    }
-
-    _sizeTracker++;
-    return iterator(this, std::move(retIt), retOffset);
+    return ptr;
 }
 
 PieceTable::iterator PieceTable::erase(const iterator& extIt) {
@@ -182,41 +134,100 @@ PieceTable::iterator PieceTable::erase(const iterator& extIt) {
     return _eraseImpl(extIt);
 }
 
+PieceTable::iterator PieceTable::insert(const iterator& extIt, char ch) {
+    _lineCache.clear();
+    return _insertImpl(extIt, ch);
+}
+
+std::pair<PieceTable::PieceIterator, PieceTable::PieceIterator> PieceTable::_splitAt(
+    PieceTable::iterator it) {
+    auto itImpl = _itToImpl(it);
+    auto pieceIt = itImpl->_it;
+    if (pieceIt == _pieces.end()) {
+        return {std::prev(pieceIt), pieceIt};
+    }
+    auto offsetWithinPiece = itImpl->_off;
+    auto splitLength = pieceIt->length - offsetWithinPiece;
+
+    if (splitLength == 0) {
+        return {pieceIt, std::next(pieceIt)};
+    } else if (splitLength == pieceIt->length) {
+        return {std::prev(pieceIt), pieceIt};
+    }
+
+    auto next = std::next(pieceIt);
+    Piece toInsert{pieceIt->type, pieceIt->start + offsetWithinPiece, splitLength};
+    next = _pieces.emplace(next, std::move(toInsert));
+    pieceIt->length -= splitLength;
+    return {pieceIt, next};
+}
+
 PieceTable::iterator PieceTable::_eraseImpl(const iterator& extIt) {
-    const auto& it = extIt._it;
-    auto offsetWithinPiece = extIt._off;
+    auto extItImpl = _itToImpl(extIt);
+    const auto& it = extItImpl->_it;
+    auto offsetWithinPiece = extItImpl->_off;
+
     if (it == _pieces.end()) {
         return end();
     }
 
-    auto isTrivialErase = (it->type == Piece::AddBuffer) && (it->length > 0) &&
+    auto isTrivialErase = (it->type == Piece::kAddBuffer) && (it->length > 0) &&
         (it->start + it->length == _addBuffer.size()) && (offsetWithinPiece == it->length);
     _sizeTracker--;
     _dirty = true;
     if (isTrivialErase) {
         it->length--;
         _addBuffer.pop_back();
-        return iterator(this, it, offsetWithinPiece--);
+        return IteratorImpl(this, it, offsetWithinPiece--);
     } else {
-        PieceIterator next = it;
-        ++next;
-        auto splitLength = it->length - offsetWithinPiece;
+        PieceIterator before, after;
+        std::tie(before, after) = _splitAt(extIt);
 
-        if (splitLength > 1) {
-            next = _pieces.emplace(
-                next, Piece{it->type, it->start + offsetWithinPiece + 1, splitLength - 1});
-        }
-        it->length -= splitLength;
-        if (it->length == 0) {
-            _pieces.erase(it);
+        if (after != _pieces.end()) {
+            if (after->length == 1) {
+                after = _pieces.erase(after);
+            } else {
+                after->start++;
+                after->length--;
+            }
+        } else if (before->length > 1) {
+            before->length--;
+        } else {
+            _pieces.erase(before);
         }
 
-        if (next != _pieces.end()) {
-            return iterator(this, next, 0);
-        }
+        return IteratorImpl(this, after, 0);
+    }
+}
+
+PieceTable::iterator PieceTable::_insertImpl(const PieceTable::iterator& extIt, char ch) {
+    PieceIterator retIt;
+    size_t retOffset = 0;
+
+    _addBuffer.push_back(ch);
+    Piece toInsert{Piece::kAddBuffer, _addBuffer.size() - 1, 1};
+    _dirty = true;
+
+    auto prevPoint = extIt != begin() ? std::prev(extIt) : extIt;
+    const auto extItImpl = _itToImpl(prevPoint);
+    Piece& prevPiece = *extItImpl->_it;
+    auto offsetWithinPiece = extItImpl->_off + 1;
+
+    auto isTrivialAppend = (prevPiece.type & Piece::kAddBuffer) &&
+        (prevPiece.start + prevPiece.length == _addBuffer.size() - 1) &&
+        ((offsetWithinPiece == prevPiece.length || prevPiece.length == 0));
+    if (isTrivialAppend) {
+        prevPiece.length++;
+        retIt = extItImpl->_it;
+        retOffset = prevPiece.length - 1;
+    } else {
+        PieceIterator before, after;
+        std::tie(before, after) = _splitAt(extIt);
+        retIt = _pieces.emplace(after, std::move(toInsert));
     }
 
-    return begin();
+    _sizeTracker++;
+    return IteratorImpl(this, std::move(retIt), retOffset);
 }
 
 off_t PieceTable::_seekOriginal(off_t offset, int whence) {
@@ -228,7 +239,7 @@ off_t PieceTable::_seekOriginal(off_t offset, int whence) {
     return ret;
 }
 
-PieceTable::Line PieceTable::_findEOL(PieceTable::iterator it) {
+Line PieceTable::_findEOL(PieceTable::iterator it) {
     auto begin = it;
     size_t size = 0;
     while (it != end() && !isEOL(*it)) {
@@ -249,7 +260,7 @@ PieceTable::Line PieceTable::_findEOL(PieceTable::iterator it) {
     return Line{begin, lineEnd, it, size};
 }
 
-stdx::optional<PieceTable::Line> PieceTable::getLine(size_t lineNumber) {
+stdx::optional<Line> PieceTable::getLine(size_t lineNumber) {
     if (_pieces.empty()) {
         return stdx::nullopt;
     }
@@ -320,11 +331,11 @@ void PieceTable::save(const std::string& file) {
         char* toWrite = nullptr;
         size_t count = 0;
         switch (piece.type) {
-            case Piece::AddBuffer:
+            case Piece::kAddBuffer:
                 toWrite = &_addBuffer.at(piece.start);
                 count = piece.length;
                 break;
-            case Piece::Original:
+            case Piece::kOriginal:
                 toWrite = const_cast<char*>(&_originalFileView.at(piece.start));
                 count = piece.length;
                 break;

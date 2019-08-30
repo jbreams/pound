@@ -2,13 +2,27 @@
 #include <regex>
 #include <string>
 
+#include "document.h"
 #include "piecetable.h"
 #include "pound.h"
 #include "prompt.h"
 #include "terminal.h"
 
-std::string doSaveAs(Terminal* term, PieceTable* buffer) {
-    auto prompt = std::make_unique<OneLinePrompt>(term, "Save file as:");
+struct PromptGuard {
+    PromptGuard(Terminal* term) : _term(term) {}
+    ~PromptGuard() {
+        if (_term) {
+            _term->endPrompt();
+        }
+    }
+
+    Terminal* _term = nullptr;
+};
+
+std::string doSaveAs(Terminal* term, DocumentBuffer* buffer) {
+    auto prompt = std::make_unique<OneLinePrompt>("Save file as:");
+    term->startPrompt(prompt.get());
+    PromptGuard guard(term);
     term->refresh();
     for (auto c = term->readKeyCode(); c != KeyCodes::kNewLine; c = term->readKeyCode()) {
         if (c == KeyCodes::kArrowLeft) {
@@ -34,9 +48,11 @@ std::string doSaveAs(Terminal* term, PieceTable* buffer) {
     return prompt->result();
 }
 
-void doFind(Terminal* term, PieceTable* buffer, Position start) {
+void doFind(Terminal* term, DocumentBuffer* buffer) {
     const auto defaultPrompt = "Find: (Press ENTER to begin find)"_sv;
-    auto prompt = std::make_unique<OneLinePrompt>(term, defaultPrompt.to_string());
+    auto prompt = std::make_unique<OneLinePrompt>(defaultPrompt.to_string());
+    term->startPrompt(prompt.get());
+    PromptGuard guard(term);
     term->refresh();
 
     std::regex searchRegex;
@@ -83,7 +99,7 @@ void doFind(Terminal* term, PieceTable* buffer, Position start) {
         return;
     }
 
-    size_t lineNumber = start.row;
+    size_t lineNumber = buffer->virtualPosition().row;
     for (; c == KeyCodes::kNewLine; c = term->readKeyCode()) {
         using RegexIterator = std::regex_iterator<PieceTable::iterator>;
         const auto findEnd = RegexIterator();
@@ -105,33 +121,33 @@ void doFind(Terminal* term, PieceTable* buffer, Position start) {
             Position matchPos(lineNumber, findIt->position());
             prompt->updatePrompt(
                 "Found match at row {} column {}"_format(matchPos.row, matchPos.column));
-            term->setVirtualPosition(matchPos);
+            buffer->setVirtualPosition(matchPos);
             term->refresh();
         }
     }
 }
 
 int main(int argc, char** argv) try {
-    std::unique_ptr<PieceTable> pieceTable;
+    std::unique_ptr<DocumentBuffer> buffer;
     stdx::optional<std::string> fileName;
     if (argc == 1) {
-        pieceTable = std::make_unique<PieceTable>();
+        buffer = std::make_unique<DocumentBuffer>();
     } else {
         fileName = argv[1];
-        pieceTable = std::make_unique<PieceTable>(*fileName);
+        buffer = std::make_unique<DocumentBuffer>(*fileName);
     }
 
-    Terminal term(pieceTable.get());
+    Terminal term(buffer.get());
     term.refresh();
 
     auto terminalPosToBufferPos = [&] {
-        auto pos = term.getVirtualPosition();
-        auto line = pieceTable->getLine(pos.row);
+        auto pos = buffer->virtualPosition();
+        auto line = buffer->getLine(pos.row);
         if (!line) {
             if (pos.row != 0 && pos.column != 0) {
                 throw PoundException("Trying to access row {} that does not exist"_format(pos.row));
             }
-            return pieceTable->end();
+            return buffer->end();
         }
 
         auto it = line->begin();
@@ -141,62 +157,62 @@ int main(int argc, char** argv) try {
 
     for (auto c = term.readKeyCode(); c != modCtrlKey('q'); c = term.readKeyCode()) {
         if (c == KeyCodes::kArrowUp) {
-            term.moveCursor(Direction::Up);
+            buffer->moveVirtualPosition(Direction::Up);
         } else if (c == KeyCodes::kArrowDown) {
-            term.moveCursor(Direction::Down);
+            buffer->moveVirtualPosition(Direction::Down);
         } else if (c == KeyCodes::kArrowRight) {
-            term.moveCursor(Direction::Right);
+            buffer->moveVirtualPosition(Direction::Right);
         } else if (c == KeyCodes::kArrowLeft) {
-            term.moveCursor(Direction::Left);
+            buffer->moveVirtualPosition(Direction::Left);
         } else if (c == KeyCodes::kHome) {
-            auto pos = term.getVirtualPosition();
-            term.moveCursor(Direction::Left, pos.column);
+            auto pos = buffer->virtualPosition();
+            buffer->moveVirtualPosition(Direction::Left, pos.column);
         } else if (c == KeyCodes::kEnd) {
-            auto pos = term.getVirtualPosition();
-            auto line = pieceTable->getLine(pos.row);
-            term.moveCursor(Direction::Right, line->size() - pos.column);
+            auto pos = buffer->virtualPosition();
+            auto line = buffer->getLine(pos.row);
+            buffer->moveVirtualPosition(Direction::Right, line->size() - pos.column);
         } else if (c == KeyCodes::kPageDown) {
-            term.moveCursor(Direction::Down, term.getTerminalSize().row);
+            buffer->moveVirtualPosition(Direction::Down, buffer->allocation().row);
         } else if (c == KeyCodes::kPageUp) {
-            term.moveCursor(Direction::Up, term.getTerminalSize().row);
+            buffer->moveVirtualPosition(Direction::Up, buffer->allocation().row);
         } else if (c == KeyCodes::kDelete) {
-            pieceTable->erase(terminalPosToBufferPos());
+            buffer->erase(terminalPosToBufferPos());
         } else if (c == KeyCodes::kBackspace) {
-            auto pos = term.getVirtualPosition();
+            auto pos = buffer->virtualPosition();
             if (pos.column == 0) {
                 if (pos.row == 0) {
                     continue;
                 }
 
-                auto line = pieceTable->getLine(pos.row - 1);
+                auto line = buffer->getLine(pos.row - 1);
                 auto it = line->end();
-                char prevCh = (it == pieceTable->end()) ? '\0' : *it;
-                while (it != pieceTable->end()) {
-                    term.moveCursor(Direction::Left);
-                    it = pieceTable->erase(it);
+                char prevCh = (it == buffer->end()) ? '\0' : *it;
+                while (it != buffer->end()) {
+                    buffer->moveVirtualPosition(Direction::Left);
+                    it = buffer->erase(it);
                     char curCh = *it;
                     if (!isEOL(curCh) || curCh != prevCh) {
                         break;
                     }
                 }
             } else {
-                term.moveCursor(Direction::Left);
-                pieceTable->erase(terminalPosToBufferPos());
+                buffer->moveVirtualPosition(Direction::Left);
+                buffer->erase(terminalPosToBufferPos());
             }
         } else if (c == modCtrlKey('f')) {
-            doFind(&term, pieceTable.get(), term.getVirtualPosition());
+            doFind(&term, buffer.get());
         } else if (c == modCtrlKey('s')) {
             if (fileName) {
-                pieceTable->save(*fileName);
+                buffer->save(*fileName);
             } else {
-                fileName = doSaveAs(&term, pieceTable.get());
+                fileName = doSaveAs(&term, buffer.get());
             }
         } else if (c == modCtrlKey('w')) {
-            doSaveAs(&term, pieceTable.get());
+            doSaveAs(&term, buffer.get());
         } else if (c < KeyCodes::kSpecialKeyCodes &&
                    (std::isprint(static_cast<char>(c)) || c == KeyCodes::kNewLine)) {
-            pieceTable->insert(terminalPosToBufferPos(), static_cast<char>(c));
-            term.moveCursor(Direction::Right);
+            buffer->insert(terminalPosToBufferPos(), static_cast<char>(c));
+            buffer->moveVirtualPosition(Direction::Right);
         } else {
             throw PoundException("Unknown character {}"_format(static_cast<int16_t>(c)));
         }
