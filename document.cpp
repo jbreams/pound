@@ -17,6 +17,23 @@ Position DocumentBuffer::cursorPosition() const {
             _virtualPosition.column - _scrollOffset.column};
 }
 
+void DocumentBuffer::fixVirtualPosition() {
+    auto line = PieceTable::getLine(_virtualPosition.row);
+    while (!line && _virtualPosition.row > 0) {
+        line = PieceTable::getLine(--_virtualPosition.row);
+    }
+
+    if (!line) {
+        _virtualPosition.column = 0;
+        _scrollOffset = {0, 0};
+        return;
+    }
+
+    _virtualPosition.column =
+        std::min(_virtualPosition.column, line->size() - line->lineEndingCount());
+    _fixScrollOffset();
+}
+
 void DocumentBuffer::moveVirtualPosition(Direction dir, size_t count) {
     while (count > 0) {
         switch (dir) {

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <list>
 #include <map>
+#include <stack>
 #include <string>
 
 #include "pound.h"
@@ -63,13 +64,12 @@ public:
 
     bool dirty() const;
     void save(const std::string& name);
+    void undo();
 
     stdx::optional<Line> getLine(size_t lineNumber) override;
 
     iterator begin() override;
     const iterator& end() const override;
-
-    size_t size() const;
 
     iterator insert(const iterator& it, char ch);
     iterator erase(const iterator& it);
@@ -106,4 +106,17 @@ private:
     std::string _addBuffer;
 
     std::map<size_t, Line> _lineCache;
+
+    struct ChangeRecord {
+        enum Type { kTrivial, kSplit, kWasEmpty };
+        ChangeRecord(Type type_, Piece oldPiece_, PieceIterator itAfterChange_)
+            : type(type_),
+              oldPiece(std::move(oldPiece_)),
+              itAfterChange(std::move(itAfterChange_)) {}
+        Type type;
+        Piece oldPiece;
+        PieceIterator itAfterChange;
+    };
+
+    std::stack<ChangeRecord> _undoStack;
 };

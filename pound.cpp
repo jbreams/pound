@@ -268,8 +268,9 @@ int main(int argc, char** argv) try {
                     Position(pos.row - 1, prevLine->size() - prevLine->lineEndingCount()));
                 buffer->erase(std::prev(it));
             } else {
+                auto toErase = std::prev(it);
                 buffer->moveVirtualPosition(Direction::Left);
-                buffer->erase(it);
+                buffer->erase(toErase);
             }
         } else if (c == modCtrlKey('f')) {
             doFind(&term, buffer.get());
@@ -281,6 +282,9 @@ int main(int argc, char** argv) try {
             }
         } else if (c == modCtrlKey('w')) {
             doSaveAs(&term, buffer.get());
+        } else if (c == modCtrlKey('z')) {
+            buffer->undo();
+            buffer->fixVirtualPosition();
         } else if (c < KeyCodes::kSpecialKeyCodes &&
                    (std::isprint(static_cast<char>(c)) || c == KeyCodes::kNewLine)) {
             buffer->insert(terminalPosToBufferPos(), static_cast<char>(c));

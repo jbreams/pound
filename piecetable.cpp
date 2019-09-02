@@ -13,7 +13,6 @@ PieceTable::PieceTable(const std::string& fileName) : _endIt(IteratorImpl(this, 
     if (_originalFile == -1) {
         auto err = std::make_error_code(static_cast<std::errc>(errno));
         if (err == std::errc::no_such_file_or_directory) {
-            _pieces.emplace_front(Piece::kAddBuffer, 0, 0);
             return;
         }
         throw PoundException("Error opening file {}"_format(fileName), err);
@@ -34,7 +33,6 @@ PieceTable::PieceTable(const std::string& fileName) : _endIt(IteratorImpl(this, 
         throw PoundException("Error mapping original file {}"_format(fileName), err);
     }
     _originalFileView = stdx::string_view(_originalFileMapping, originalFileSize);
-    _sizeTracker = originalFileSize;
     _pieces.emplace_back(Piece{Piece::kOriginal, 0, originalFileSize});
 }
 
@@ -50,10 +48,6 @@ PieceTable::~PieceTable() {
         _originalFileMapping = nullptr;
         _originalFileView = {};
     }
-}
-
-size_t PieceTable::size() const {
-    return _sizeTracker;
 }
 
 bool PieceTable::IteratorImpl::_isValid() const {
@@ -173,18 +167,22 @@ PieceTable::iterator PieceTable::_eraseImpl(const iterator& extIt) {
 
     auto isTrivialErase = (it->type == Piece::kAddBuffer) && (it->length > 0) &&
         (it->start + it->length == _addBuffer.size()) && (offsetWithinPiece == it->length);
-    _sizeTracker--;
     _dirty = true;
     if (isTrivialErase) {
+        _undoStack.emplace(ChangeRecord::kTrivial, *it, std::next(it));
         it->length--;
         _addBuffer.pop_back();
+
         return IteratorImpl(this, it, offsetWithinPiece--);
     } else {
         PieceIterator before, after;
+        auto undoPiece = *it;
+        auto undoType = ChangeRecord::kSplit;
         std::tie(before, after) = _splitAt(extIt);
 
         if (after != _pieces.end()) {
             if (after->length == 1) {
+                undoType = ChangeRecord::kTrivial;
                 after = _pieces.erase(after);
             } else {
                 after->start++;
@@ -193,9 +191,11 @@ PieceTable::iterator PieceTable::_eraseImpl(const iterator& extIt) {
         } else if (before->length > 1) {
             before->length--;
         } else {
+            undoType = ChangeRecord::kTrivial;
             _pieces.erase(before);
         }
 
+        _undoStack.emplace(undoType, undoPiece, after);
         return IteratorImpl(this, after, 0);
     }
 }
@@ -207,6 +207,11 @@ PieceTable::iterator PieceTable::_insertImpl(const PieceTable::iterator& extIt, 
     _addBuffer.push_back(ch);
     Piece toInsert{Piece::kAddBuffer, _addBuffer.size() - 1, 1};
     _dirty = true;
+    if (_pieces.empty()) {
+        _pieces.emplace_back(toInsert);
+        _undoStack.emplace(ChangeRecord(ChangeRecord::kWasEmpty, toInsert, _pieces.end()));
+        return IteratorImpl(this, _pieces.begin(), 0);
+    }
 
     auto prevPoint = extIt != begin() ? std::prev(extIt) : extIt;
     const auto extItImpl = _itToImpl(prevPoint);
@@ -217,16 +222,18 @@ PieceTable::iterator PieceTable::_insertImpl(const PieceTable::iterator& extIt, 
         (prevPiece.start + prevPiece.length == _addBuffer.size() - 1) &&
         ((offsetWithinPiece == prevPiece.length || prevPiece.length == 0));
     if (isTrivialAppend) {
+        _undoStack.emplace(ChangeRecord::kTrivial, prevPiece, std::next(extItImpl->_it));
         prevPiece.length++;
         retIt = extItImpl->_it;
         retOffset = prevPiece.length - 1;
     } else {
         PieceIterator before, after;
+        auto undoPiece = prevPiece;
         std::tie(before, after) = _splitAt(extIt);
+        _undoStack.emplace(ChangeRecord::kSplit, undoPiece, after);
         retIt = _pieces.emplace(after, std::move(toInsert));
     }
 
-    _sizeTracker++;
     return IteratorImpl(this, std::move(retIt), retOffset);
 }
 
@@ -237,6 +244,36 @@ off_t PieceTable::_seekOriginal(off_t offset, int whence) {
         throw PoundException("Error seeking original file", err);
     }
     return ret;
+}
+
+void PieceTable::undo() {
+    if (_undoStack.empty()) {
+        return;
+    }
+    auto& changeRecord = _undoStack.top();
+    switch (changeRecord.type) {
+        case ChangeRecord::kTrivial: {
+            auto it = std::prev(changeRecord.itAfterChange);
+            *it = changeRecord.oldPiece;
+            break;
+        }
+        case ChangeRecord::kSplit: {
+            auto it = std::prev(changeRecord.itAfterChange, 2);
+            *it = changeRecord.oldPiece;
+            ++it;
+            it = _pieces.erase(it);
+            if (it != _pieces.end()) {
+                it = _pieces.erase(it);
+            }
+            break;
+        }
+        case ChangeRecord::kWasEmpty:
+            _pieces.clear();
+            break;
+    }
+
+    _lineCache.clear();
+    _undoStack.pop();
 }
 
 Line findLineStartingAt(const BufferStorage::Iterator& first, const BufferStorage::Iterator& last) {

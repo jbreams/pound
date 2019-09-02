@@ -40,6 +40,7 @@ public:
     Position virtualPosition() const override {
         return _virtualPosition;
     }
+    void fixVirtualPosition();
 
     void moveVirtualPosition(Direction dir, size_t count = 1);
     void setVirtualPosition(Position pos);
