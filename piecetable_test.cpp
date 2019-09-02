@@ -26,8 +26,6 @@ void dumpTable(PieceTable& table) {
 
 void testContents(PieceTable& table, stdx::string_view match) {
     dumpTable(table);
-    const auto size = table.size();
-    REQUIRE(size == match.size());
     std::string str;
     std::copy(table.begin(), table.end(), std::back_inserter(str));
     REQUIRE(str == match);
@@ -158,12 +156,6 @@ TEST_CASE("ReverseIterator", "[PieceTable]") {
 
     std::advance(it, 3);
     it = table.insert(it, 'i');
-    auto newEnd = table.begin();
-    std::advance(newEnd, table.size() - 2);
-    auto newBegin = std::prev(it, 2);
-    while (newBegin != newEnd) {
-        ++newBegin;
-    }
 
     testContents(table, "bizki fuoy");
 }

@@ -266,3 +266,10 @@ void Terminal::endPrompt() {
     bufferAllocation.row -= 1;
     _buffer->setAllocation(bufferAllocation);
 }
+
+void Terminal::setBuffer(Buffer* buf) {
+    _buffer = buf;
+    Position bufferAllocation = getTerminalSize();
+    bufferAllocation.row -= 1;
+    _buffer->setAllocation(bufferAllocation);
+}

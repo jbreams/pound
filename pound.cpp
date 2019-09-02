@@ -19,7 +19,7 @@ struct PromptGuard {
     Terminal* _term = nullptr;
 };
 
-std::string doSaveAs(Terminal* term, DocumentBuffer* buffer) {
+void doSaveAs(Terminal* term, DocumentBuffer* buffer) {
     auto prompt = std::make_unique<OneLinePrompt>("Save file as:");
     term->startPrompt(prompt.get());
     PromptGuard guard(term);
@@ -43,11 +43,42 @@ std::string doSaveAs(Terminal* term, DocumentBuffer* buffer) {
         term->refresh();
     }
 
-    buffer->save(prompt->result());
+    auto result = prompt->result();
+    if (result.empty()) {
+        term->setStatusMessage("No filename specified. Not saving anything.");
+        return;
+    }
+    buffer->setFileName(prompt->result());
+    buffer->save();
     term->setStatusMessage("Successfully saved {}"_format(prompt->result()));
-    return prompt->result();
 }
 
+std::unique_ptr<DocumentBuffer> doOpen(Terminal* term) {
+    auto prompt = std::make_unique<OneLinePrompt>("Open file:");
+    term->startPrompt(prompt.get());
+    PromptGuard guard(term);
+    term->refresh();
+    for (auto c = term->readKeyCode(); c != KeyCodes::kNewLine; c = term->readKeyCode()) {
+        if (c == KeyCodes::kArrowLeft) {
+            prompt->movePosition(Direction::Left);
+        } else if (c == KeyCodes::kArrowRight) {
+            prompt->movePosition(Direction::Right);
+        } else if (c == KeyCodes::kDelete) {
+            prompt->erase();
+        } else if (c == KeyCodes::kBackspace) {
+            if (prompt->virtualOffset() > 0) {
+                prompt->movePosition(Direction::Left);
+                prompt->erase();
+            }
+        } else if (c < KeyCodes::kSpecialKeyCodes && std::isprint(static_cast<char>(c))) {
+            prompt->movePosition(Direction::Right);
+            prompt->insert(static_cast<char>(c));
+        }
+        term->refresh();
+    }
+
+    return std::make_unique<DocumentBuffer>(prompt->result());
+}
 struct MatchFinder {
     using MatchVector = std::vector<std::pair<size_t, size_t>>;
     MatchFinder(DocumentBuffer* buffer_, MatchVector matches_)
@@ -207,17 +238,21 @@ void doFind(Terminal* term, DocumentBuffer* buffer) {
 }
 
 int main(int argc, char** argv) try {
-    std::unique_ptr<DocumentBuffer> buffer;
+    std::vector<std::unique_ptr<DocumentBuffer>> buffers;
     stdx::optional<std::string> fileName;
     if (argc == 1) {
-        buffer = std::make_unique<DocumentBuffer>();
+        buffers.emplace_back(std::make_unique<DocumentBuffer>());
     } else {
         fileName = argv[1];
-        buffer = std::make_unique<DocumentBuffer>(*fileName);
+        buffers.emplace_back(std::make_unique<DocumentBuffer>(*fileName));
     }
 
-    Terminal term(buffer.get());
+
+    Terminal term(buffers.front().get());
     term.refresh();
+
+    size_t curBuffer = 0;
+    auto buffer = buffers.at(curBuffer).get();
 
     auto terminalPosToBufferPos = [&] {
         auto pos = buffer->virtualPosition();
@@ -234,6 +269,7 @@ int main(int argc, char** argv) try {
     };
 
     for (auto c = term.readKeyCode(); c != modCtrlKey('q'); c = term.readKeyCode()) {
+        buffer = buffers.at(curBuffer).get();
         if (c == KeyCodes::kArrowUp) {
             buffer->moveVirtualPosition(Direction::Up);
         } else if (c == KeyCodes::kArrowDown) {
@@ -260,6 +296,7 @@ int main(int argc, char** argv) try {
             auto it = terminalPosToBufferPos();
             if (pos.column == 0) {
                 if (pos.row == 0) {
+                    buffer->erase(it);
                     continue;
                 }
 
@@ -273,15 +310,37 @@ int main(int argc, char** argv) try {
                 buffer->erase(toErase);
             }
         } else if (c == modCtrlKey('f')) {
-            doFind(&term, buffer.get());
+            doFind(&term, buffer);
         } else if (c == modCtrlKey('s')) {
-            if (fileName) {
-                buffer->save(*fileName);
+            if (buffer->hasFileName()) {
+                buffer->save();
             } else {
-                fileName = doSaveAs(&term, buffer.get());
+                doSaveAs(&term, buffer);
             }
+        } else if (c == modCtrlKey('n')) {
+            buffers.emplace_back(std::make_unique<DocumentBuffer>());
+            curBuffer = buffers.size() - 1;
+            term.setBuffer(buffers.back().get());
+        } else if (c == modCtrlKey('o')) {
+            buffers.emplace_back(doOpen(&term));
+            curBuffer = buffers.size() - 1;
+            term.setBuffer(buffers.back().get());
+        } else if (c == modCtrlKey('j')) {
+            if (curBuffer == 0) {
+                curBuffer = buffers.size() - 1;
+            } else {
+                curBuffer--;
+            }
+            term.setBuffer(buffers.at(curBuffer).get());
+        } else if (c == modCtrlKey('k')) {
+            if (curBuffer == buffers.size() - 1) {
+                curBuffer = 0;
+            } else {
+                curBuffer++;
+            }
+            term.setBuffer(buffers.at(curBuffer).get());
         } else if (c == modCtrlKey('w')) {
-            doSaveAs(&term, buffer.get());
+            doSaveAs(&term, buffer);
         } else if (c == modCtrlKey('z')) {
             buffer->undo();
             buffer->fixVirtualPosition();

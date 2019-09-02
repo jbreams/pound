@@ -105,6 +105,7 @@ public:
 
     void refresh();
 
+    void setBuffer(Buffer* buffer);
     void setStatusMessage(std::string message);
     void startPrompt(Buffer* prompt);
     void endPrompt();

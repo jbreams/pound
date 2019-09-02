@@ -17,6 +17,21 @@ Position DocumentBuffer::cursorPosition() const {
             _virtualPosition.column - _scrollOffset.column};
 }
 
+void DocumentBuffer::setFileName(std::string name) {
+    _fileName = std::move(name);
+}
+
+bool DocumentBuffer::hasFileName() const {
+    return !_fileName.empty();
+}
+
+void DocumentBuffer::save() {
+    if (_fileName.empty()) {
+        throw PoundException("No filename set for buffer");
+    }
+    PieceTable::save(_fileName);
+}
+
 void DocumentBuffer::fixVirtualPosition() {
     auto line = PieceTable::getLine(_virtualPosition.row);
     while (!line && _virtualPosition.row > 0) {

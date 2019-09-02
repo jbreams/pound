@@ -26,6 +26,9 @@ public:
 
     using Decorations = std::multiset<Decoration>;
 
+    DocumentBuffer(const std::string fileName)
+        : PieceTable(fileName), _fileName(std::move(fileName)) {}
+
     bool showCursor() const override {
         return true;
     }
@@ -35,11 +38,17 @@ public:
         return {std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()};
     }
 
+    void setFileName(std::string filename);
+    bool hasFileName() const;
+    void save();
+
     stdx::optional<Line> getLine(size_t line) override;
     Position cursorPosition() const override;
     Position virtualPosition() const override {
         return _virtualPosition;
     }
+
+
     void fixVirtualPosition();
 
     void moveVirtualPosition(Direction dir, size_t count = 1);
@@ -56,4 +65,5 @@ private:
     Position _virtualPosition;
 
     Decorations _decorations;
+    std::string _fileName;
 };
