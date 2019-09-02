@@ -82,8 +82,7 @@ TEST_CASE("FileLoad", "[PieceTable]") {
 
     testContents(table, testFile.contents);
 
-    auto it = table.begin();
-    it += 4;
+    auto it = std::next(table.begin(), 4);
     it = table.insert(++it, 'f');
     it = table.insert(++it, 'o');
     it = table.insert(++it, 'o');
@@ -99,14 +98,12 @@ TEST_CASE("EraseOriginalFile", "[PieceTable]") {
 
     testContents(table, testFile.contents);
 
-    auto it = table.begin();
-    it += 4;
+    auto it = std::next(table.begin(), 4);
     table.erase(it);
 
     testContents(table, "bizzbuzz"_sv);
 
-    it = table.begin();
-    it += 6;
+    it = std::next(table.begin(), 6);
     table.erase(it);
 
     testContents(table, "bizzbuz"_sv);
@@ -117,8 +114,7 @@ TEST_CASE("EraseOriginalFile", "[PieceTable]") {
     it = table.begin();
     table.insert(it, 'f');
 
-    it = table.begin();
-    it += 7;
+    it = std::next(table.begin(), 7);
     table.insert(it, 'f');
     testContents(table, "fizzbuzf"_sv);
 
@@ -156,17 +152,15 @@ TEST_CASE("ReverseIterator", "[PieceTable]") {
     --it;
     REQUIRE(*it == 'i');
 
-    auto end = it;
-    end += 3;
+    auto end = std::next(it, 3);
     REQUIRE(*end == ' ');
     REQUIRE(end != table.end());
 
-    it += 3;
+    std::advance(it, 3);
     it = table.insert(it, 'i');
     auto newEnd = table.begin();
-    newEnd += table.size() - 2;
-    auto newBegin = it;
-    newBegin -= 2;
+    std::advance(newEnd, table.size() - 2);
+    auto newBegin = std::prev(it, 2);
     while (newBegin != newEnd) {
         ++newBegin;
     }
@@ -175,22 +169,30 @@ TEST_CASE("ReverseIterator", "[PieceTable]") {
 }
 
 TEST_CASE("Lines", "[PieceTable]") {
-    TempFile testFile("abc\ndef\n\nghi\nfoobarbizzbuzz");
+    TempFile testFile("abc\ndef\n\n\nghi\nfodbarbiyzbuzz");
     PieceTable table(testFile.path);
 
     testContents(table, testFile.contents);
 
     auto line = table.getLine(0);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "abc");
+    REQUIRE(dumpLine(*line) == "abc\n");
 
     line = table.getLine(2);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "");
+    REQUIRE(dumpLine(*line) == "\n");
+    REQUIRE(line->size() == 1);
 
     line = table.getLine(3);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "ghi");
+    REQUIRE(dumpLine(*line) == "\n");
+    REQUIRE(line->size() == 1);
+    table.erase(line->begin());
+
+    line = table.getLine(3);
+    REQUIRE(line);
+    REQUIRE(dumpLine(*line) == "ghi\n");
+    REQUIRE(line->size() == 4);
 
     line = table.getLine(2);
     REQUIRE(line);
@@ -198,18 +200,45 @@ TEST_CASE("Lines", "[PieceTable]") {
 
     line = table.getLine(2);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "ghi");
+    REQUIRE(dumpLine(*line) == "ghi\n");
 
     line = table.getLine(3);
     REQUIRE(line);
-    std::regex regex("barbizz");
+
+    std::regex regex("barbiyz");
     using RegexIterator = std::regex_iterator<PieceTable::iterator>;
-    auto regexBegin = RegexIterator(line->begin(), line->end(), regex);
+    auto regexBegin = RegexIterator(std::next(table.begin(), 2), table.end(), regex);
     auto regexEnd = RegexIterator();
     REQUIRE(regexBegin != regexEnd);
-    REQUIRE(regexBegin->position() == 3);
+    REQUIRE(regexBegin->position() == 13);
     REQUIRE(regexBegin->length() == 7);
-    REQUIRE(regexBegin->str() == "barbizz");
+    REQUIRE(regexBegin->str() == "barbiyz");
+
+    size_t traversed = 0;
+    size_t lineNumber = 0;
+    for (line = table.getLine(0); line; lineNumber++, line = table.getLine(lineNumber)) {
+        fmt::print(stderr,
+                   "Traversed {} Line {} TotalSize {} Position {}\n",
+                   traversed,
+                   lineNumber,
+                   line->size(),
+                   regexBegin->position());
+        if (traversed + line->size() > regexBegin->position()) {
+            break;
+        }
+        traversed += line->size();
+    }
+
+    REQUIRE(line);
+    REQUIRE(lineNumber == 3);
+    REQUIRE(traversed == 12);
+    auto colStart = regexBegin->position() - traversed + 2;
+    auto colEnd = colStart + regexBegin->length() - 1;
+    auto it = std::next(line->begin(), colStart);
+    REQUIRE(*it == 'b');
+    it = std::next(line->begin(), colEnd);
+    REQUIRE(*it == 'z');
+
     ++regexBegin;
     REQUIRE(regexBegin == regexEnd);
 
@@ -224,9 +253,9 @@ TEST_CASE("Lines", "[PieceTable]") {
 
     line = table.getLine(1);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "df");
+    REQUIRE(dumpLine(*line) == "df\n");
 
     line = table.getLine(0);
     REQUIRE(line);
-    REQUIRE(dumpLine(*line) == "abc");
+    REQUIRE(dumpLine(*line) == "abc\n");
 }

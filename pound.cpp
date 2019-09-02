@@ -48,6 +48,73 @@ std::string doSaveAs(Terminal* term, DocumentBuffer* buffer) {
     return prompt->result();
 }
 
+struct MatchFinder {
+    using MatchVector = std::vector<std::pair<size_t, size_t>>;
+    MatchFinder(DocumentBuffer* buffer_, MatchVector matches_)
+        : buffer(buffer_),
+          matches(std::move(matches_)),
+          bufferIt(buffer->begin()),
+          matchIt(matches.begin()),
+          curLine(findLineStartingAt(bufferIt, buffer->end())) {}
+
+    std::pair<Position, Position> next();
+    bool more() const;
+    void reset();
+
+    DocumentBuffer* buffer;
+    MatchVector matches;
+    DocumentBuffer::iterator bufferIt;
+    MatchVector::iterator matchIt;
+    size_t bufferOffset = 0;
+    size_t curLineNumber = 0;
+    Line curLine;
+};
+
+bool MatchFinder::more() const {
+    return matchIt != matches.end();
+}
+
+void MatchFinder::reset() {
+    bufferOffset = 0;
+    curLineNumber = 0;
+    matchIt = matches.begin();
+    bufferIt = buffer->begin();
+    curLine = findLineStartingAt(bufferIt, buffer->end());
+}
+
+std::pair<Position, Position> MatchFinder::next() {
+    stdx::optional<Position> first;
+    stdx::optional<Position> last;
+    const auto endOffset = matchIt->first + matchIt->second;
+    while (bufferIt != buffer->end()) {
+        auto advanced = bufferOffset + curLine.size();
+        auto curLineStart = bufferOffset;
+        if (advanced >= matchIt->first && !first) {
+            first = Position(curLineNumber, matchIt->first - curLineStart);
+        }
+
+        if (advanced >= endOffset) {
+            last = Position(curLineNumber, endOffset - curLineStart);
+        }
+
+        if (!first || !last) {
+            bufferIt = curLine.end();
+            bufferOffset = advanced;
+            curLineNumber++;
+            curLine = findLineStartingAt(bufferIt, buffer->end());
+        } else {
+            break;
+        }
+    }
+
+    if (!first || !last) {
+        throw PoundException("Overran document while searching");
+    }
+
+    ++matchIt;
+    return {*first, *last};
+}
+
 void doFind(Terminal* term, DocumentBuffer* buffer) {
     const auto defaultPrompt = "Find: (Press ENTER to begin find)"_sv;
     auto prompt = std::make_unique<OneLinePrompt>(defaultPrompt.to_string());
@@ -57,12 +124,22 @@ void doFind(Terminal* term, DocumentBuffer* buffer) {
 
     std::regex searchRegex;
     bool regexError = false;
+    std::vector<std::pair<size_t, size_t>> matches;
+
     const auto updateRegex = [&] {
         try {
             searchRegex = std::regex(prompt->result());
             if (regexError) {
                 prompt->updatePrompt(defaultPrompt.to_string());
                 regexError = false;
+            }
+
+            matches.clear();
+            using RegexIterator = std::regex_iterator<PieceTable::iterator>;
+            const auto findEnd = RegexIterator();
+            RegexIterator findIt(buffer->begin(), buffer->end(), searchRegex);
+            for (; findIt != findEnd; ++findIt) {
+                matches.push_back({findIt->position(), findIt->length()});
             }
         } catch (const std::regex_error& e) {
             auto errorPrompt = "Find (error in regex: {})"_format(e.what());
@@ -95,35 +172,37 @@ void doFind(Terminal* term, DocumentBuffer* buffer) {
 
     if (regexError) {
         term->setStatusMessage("Error compiling regex for find");
-        term->endPrompt();
         return;
     }
 
-    size_t lineNumber = buffer->virtualPosition().row;
+    stdx::optional<DocumentBuffer::Decorations::iterator> decorationIt;
+    if (matches.empty()) {
+        term->setStatusMessage("No results found");
+        return;
+    }
+
+    MatchFinder finder(buffer, std::move(matches));
     for (; c == KeyCodes::kNewLine; c = term->readKeyCode()) {
-        using RegexIterator = std::regex_iterator<PieceTable::iterator>;
-        const auto findEnd = RegexIterator();
-        RegexIterator findIt = findEnd;
-
-        while (findIt == findEnd) {
-            auto line = buffer->getLine(++lineNumber);
-            if (!line) {
-                prompt->updatePrompt(
-                    "Reached end of file. Press ENTER to start find from beginning.");
-                lineNumber = 0;
-                term->refresh();
-                break;
-            }
-            findIt = RegexIterator(line->begin(), line->end(), searchRegex);
+        if (decorationIt) {
+            buffer->eraseDecoration(*decorationIt);
+            decorationIt = stdx::nullopt;
         }
+        auto matchRange = finder.next();
+        auto matchPos = matchRange.first;
+        prompt->updatePrompt(
+            "Found match at row {} column {}"_format(matchPos.row + 1, matchPos.column + 1));
+        buffer->setVirtualPosition(matchPos);
+        decorationIt =
+            buffer->addDecoration(matchPos, matchRange.second, escape::kBold.to_string());
+        term->refresh();
 
-        for (; findIt != findEnd; ++findIt) {
-            Position matchPos(lineNumber, findIt->position());
-            prompt->updatePrompt(
-                "Found match at row {} column {}"_format(matchPos.row, matchPos.column));
-            buffer->setVirtualPosition(matchPos);
-            term->refresh();
+        if (!finder.more()) {
+            finder.reset();
         }
+    }
+
+    if (decorationIt) {
+        buffer->eraseDecoration(*decorationIt);
     }
 }
 
@@ -150,8 +229,7 @@ int main(int argc, char** argv) try {
             return buffer->end();
         }
 
-        auto it = line->begin();
-        it += pos.column;
+        auto it = std::next(line->begin(), pos.column);
         return it;
     };
 
@@ -178,27 +256,23 @@ int main(int argc, char** argv) try {
         } else if (c == KeyCodes::kDelete) {
             buffer->erase(terminalPosToBufferPos());
         } else if (c == KeyCodes::kBackspace) {
-            auto pos = buffer->virtualPosition();
-            if (pos.column == 0) {
-                if (pos.row == 0) {
-                    continue;
-                }
+            /*            auto pos = buffer->virtualPosition();
+                        if (pos.column == 0) {
+                            if (pos.row == 0) {
+                                continue;
+                            }
 
-                auto line = buffer->getLine(pos.row - 1);
-                auto it = line->end();
-                char prevCh = (it == buffer->end()) ? '\0' : *it;
-                while (it != buffer->end()) {
-                    buffer->moveVirtualPosition(Direction::Left);
-                    it = buffer->erase(it);
-                    char curCh = *it;
-                    if (!isEOL(curCh) || curCh != prevCh) {
-                        break;
-                    }
-                }
-            } else {
-                buffer->moveVirtualPosition(Direction::Left);
-                buffer->erase(terminalPosToBufferPos());
-            }
+                            auto line = buffer->getLine(pos.row - 1);
+                            buffer->setVirtualPosition(Position(pos.row - 1, line->size()));
+                            const auto target = std::prev(line->end());
+                            auto it = std::prev(line->nextLine());
+                            while (it != target) {
+                                it = std::prev(buffer->erase(it));
+                            }
+                        } else { */
+            buffer->moveVirtualPosition(Direction::Left);
+            buffer->erase(terminalPosToBufferPos());
+            //}
         } else if (c == modCtrlKey('f')) {
             doFind(&term, buffer.get());
         } else if (c == modCtrlKey('s')) {
@@ -214,7 +288,7 @@ int main(int argc, char** argv) try {
             buffer->insert(terminalPosToBufferPos(), static_cast<char>(c));
             buffer->moveVirtualPosition(Direction::Right);
         } else {
-            throw PoundException("Unknown character {}"_format(static_cast<int16_t>(c)));
+            term.setStatusMessage("Unknown character {}"_format(static_cast<int16_t>(c)));
         }
 
         term.refresh();

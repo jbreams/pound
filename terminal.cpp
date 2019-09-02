@@ -106,10 +106,12 @@ void Terminal::refresh() {
     std::ostringstream bufToWrite;
     bufToWrite << escape::kHideCursor;
     bufToWrite << escape::kMoveCursorTo1x1;
+    bufToWrite << escape::kResetColors;
 
     auto terminalSize = getTerminalSize();
     size_t lineNumber = 0;
 
+    std::vector<std::string> curDecorations;
     for (lineNumber = 0; lineNumber <= terminalSize.row; ++lineNumber) {
         auto line = _buffer->getLine(lineNumber);
         if (line) {
@@ -118,10 +120,23 @@ void Terminal::refresh() {
             for (; it != line->end() && colCount < terminalSize.column; ++it, ++colCount) {
                 auto ch = *it;
                 if (!isEOL(ch)) {
+                    auto newDecorations =
+                        _buffer->getDecorationsForTerminal(Position(lineNumber, colCount));
+                    if (newDecorations != curDecorations) {
+                        bufToWrite << escape::kResetColors;
+                        curDecorations = newDecorations;
+                        for (const auto& decoration : curDecorations) {
+                            bufToWrite << decoration;
+                        }
+                    }
                     bufToWrite << ch;
                 }
             }
         } else {
+            if (!curDecorations.empty()) {
+                bufToWrite << escape::kResetColors;
+                curDecorations.clear();
+            }
             bufToWrite << "~"_sv;
         }
 

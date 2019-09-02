@@ -71,6 +71,11 @@ constexpr auto kSwitchToMainScreen = "\x1b[?1049l"_sv;
 // This formats an escape sequence to move the cursor. The arguments are row,
 // column
 constexpr auto kMoveCursorFmt = "\x1b[{0:d};{1:d}H"_sv;
+
+constexpr auto kResetColors = "\x1b[0m"_sv;
+constexpr auto kBold = "\x1b[1m"_sv;
+constexpr auto kUnderline = "\x1b[4m"_sv;
+constexpr auto kReverseColors = "\x1b[7m"_sv;
 }  // namespace escape
 
 class Terminal {

@@ -2,6 +2,8 @@
 
 #include "pound.h"
 
+#include <vector>
+
 class Line;
 class BufferStorage {
 public:
@@ -110,11 +112,9 @@ class Line {
 public:
     using iterator = BufferStorage::Iterator;
 
-    Line(iterator begin, iterator end, iterator nextLine, size_t size)
-        : _begin(std::move(begin)),
-          _end(std::move(end)),
-          _nextLine(std::move(nextLine)),
-          _size(size) {}
+    Line(iterator begin, iterator end, size_t size)
+        : _begin(std::move(begin)), _end(std::move(end)), _size(size) {}
+    Line() = default;
 
     iterator begin() const {
         return _begin;
@@ -124,10 +124,6 @@ public:
         return _end;
     }
 
-    iterator nextLine() const {
-        return _nextLine;
-    }
-
     size_t size() const {
         return _size;
     }
@@ -135,8 +131,7 @@ public:
 private:
     iterator _begin;
     iterator _end;
-    iterator _nextLine;
-    size_t _size;
+    size_t _size = 0;
 };
 
 class Buffer {
@@ -157,6 +152,9 @@ public:
     virtual Position cursorPosition() const = 0;
     virtual Position virtualPosition() const = 0;
     virtual bool showCursor() const = 0;
+    virtual std::vector<std::string> getDecorationsForTerminal(Position pos) {
+        return std::vector<std::string>{};
+    }
 
 private:
     Position _allocation;

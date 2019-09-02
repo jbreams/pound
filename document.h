@@ -1,5 +1,7 @@
 #pragma once
 
+#include <set>
+
 #include "pound.h"
 
 #include "piecetable.h"
@@ -7,6 +9,22 @@
 class DocumentBuffer : public Buffer, public PieceTable {
 public:
     using PieceTable::PieceTable;
+    struct Decoration {
+        Decoration(Position start_, Position end_, std::string decoration)
+            : start(start_), end(end_), decoration(std::move(decoration)) {}
+
+        Decoration(Position start_) : start(start_), end(start_), decoration() {}
+
+        bool operator<(const Decoration& other) const {
+            return start < other.start;
+        }
+
+        Position start;
+        Position end;
+        std::string decoration;
+    };
+
+    using Decorations = std::multiset<Decoration>;
 
     bool showCursor() const override {
         return true;
@@ -26,9 +44,15 @@ public:
     void moveVirtualPosition(Direction dir, size_t count = 1);
     void setVirtualPosition(Position pos);
 
+    Decorations::iterator addDecoration(Position start, Position end, std::string decoration);
+    void eraseDecoration(Decorations::iterator it);
+    std::vector<std::string> getDecorationsForTerminal(Position pos) override;
+
 private:
     void _fixScrollOffset();
 
     Position _scrollOffset;
     Position _virtualPosition;
+
+    Decorations _decorations;
 };

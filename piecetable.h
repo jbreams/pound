@@ -13,6 +13,8 @@ inline constexpr bool isEOL(char ch) {
     return ch == '\r' || ch == '\n';
 }
 
+Line findLineStartingAt(const BufferStorage::Iterator& begin, const BufferStorage::Iterator& end);
+
 class PieceTable : public BufferStorage {
 public:
     struct Piece {
@@ -27,6 +29,7 @@ public:
 
     using PieceSet = std::list<Piece>;
     using PieceIterator = PieceSet::iterator;
+    using iterator = BufferStorage::Iterator;
 
     class IteratorImpl : public Iterator::IteratorBase {
     public:
@@ -51,8 +54,6 @@ public:
         PieceIterator _it;
         size_t _off = 0;
     };
-
-    using iterator = BufferStorage::Iterator;
 
     explicit PieceTable(const std::string& fileName);
     PieceTable();
@@ -87,9 +88,8 @@ public:
     }
 
 private:
-    const IteratorImpl* _itToImpl(const iterator& it);
+    const IteratorImpl* _itToImpl(const iterator& it) const;
     off_t _seekOriginal(off_t offset, int whence);
-    Line _findEOL(iterator begin);
     iterator _eraseImpl(const iterator& it);
     iterator _insertImpl(const iterator& it, char ch);
     std::pair<PieceIterator, PieceIterator> _splitAt(iterator it);
@@ -107,21 +107,3 @@ private:
 
     std::map<size_t, Line> _lineCache;
 };
-
-template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
-PieceTable::iterator& operator+=(PieceTable::iterator& it, T off) {
-    while (off-- > 0) {
-        ++it;
-    }
-
-    return it;
-}
-
-template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
-PieceTable::iterator& operator-=(PieceTable::iterator& it, T off) {
-    while (off-- > 0) {
-        --it;
-    }
-
-    return it;
-}

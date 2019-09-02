@@ -7,9 +7,9 @@ stdx::optional<Line> DocumentBuffer::getLine(size_t lineNumber) {
         return stdx::nullopt;
     }
 
-    auto begin = line->begin();
-    begin += _scrollOffset.column;
-    return Line(begin, line->end(), line->nextLine(), line->size() - _scrollOffset.column);
+    auto begin = std::next(line->begin(), _scrollOffset.column);
+    auto size = line->size() - _scrollOffset.column;
+    return Line(begin, line->end(), size);
 }
 
 Position DocumentBuffer::cursorPosition() const {
@@ -104,4 +104,29 @@ void DocumentBuffer::_fixScrollOffset() {
     } else if (_virtualPosition.column >= _scrollOffset.column + allocation().column) {
         _scrollOffset.column = _virtualPosition.column - allocation().column + 1;
     }
+}
+
+DocumentBuffer::Decorations::iterator DocumentBuffer::addDecoration(Position start,
+                                                                    Position end,
+                                                                    std::string decoration) {
+    return _decorations.emplace(start, end, decoration);
+}
+
+void DocumentBuffer::eraseDecoration(DocumentBuffer::Decorations::iterator it) {
+    _decorations.erase(it);
+}
+
+std::vector<std::string> DocumentBuffer::getDecorationsForTerminal(Position pos) {
+    Decorations::iterator decorationBegin, decorationsEnd;
+    pos.row += _scrollOffset.row;
+    pos.column += _scrollOffset.column;
+
+    std::vector<std::string> ret;
+    for (const auto& decoration : _decorations) {
+        if ((decoration.start < pos || decoration.start == pos) && pos < decoration.end) {
+            ret.emplace_back(decoration.decoration);
+        }
+    }
+
+    return ret;
 }

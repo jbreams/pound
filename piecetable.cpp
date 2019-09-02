@@ -121,7 +121,7 @@ const PieceTable::iterator& PieceTable::end() const {
     return _endIt;
 }
 
-const PieceTable::IteratorImpl* PieceTable::_itToImpl(const iterator& it) {
+const PieceTable::IteratorImpl* PieceTable::_itToImpl(const iterator& it) const {
     auto ptr = static_cast<const IteratorImpl*>(it.impl());
     if (!ptr) {
         ptr = static_cast<const IteratorImpl*>(_endIt.impl());
@@ -239,25 +239,26 @@ off_t PieceTable::_seekOriginal(off_t offset, int whence) {
     return ret;
 }
 
-Line PieceTable::_findEOL(PieceTable::iterator it) {
-    auto begin = it;
+Line findLineStartingAt(const BufferStorage::Iterator& first, const BufferStorage::Iterator& last) {
     size_t size = 0;
-    while (it != end() && !isEOL(*it)) {
+    auto begin = first;
+    auto it = first;
+    while (it != last && !isEOL(*it)) {
         ++it;
         ++size;
     }
 
-    auto lineEnd = it;
-    while (it != end() && isEOL(*it)) {
+    while (it != last && isEOL(*it)) {
         auto prevCh = *it;
         ++it;
+        ++size;
 
-        if (it == end() || *it == prevCh) {
+        if (it == last || *it == prevCh) {
             break;
         }
     }
 
-    return Line{begin, lineEnd, it, size};
+    return Line{begin, it, size};
 }
 
 stdx::optional<Line> PieceTable::getLine(size_t lineNumber) {
@@ -272,7 +273,8 @@ stdx::optional<Line> PieceTable::getLine(size_t lineNumber) {
 
     decltype(_lineCache)::iterator lowerBoundIt;
     if (_lineCache.empty()) {
-        std::tie(lowerBoundIt, std::ignore) = _lineCache.emplace(0, _findEOL(begin()));
+        std::tie(lowerBoundIt, std::ignore) =
+            _lineCache.emplace(0, findLineStartingAt(begin(), end()));
     } else {
         lowerBoundIt = _lineCache.lower_bound(lineNumber);
         if (lowerBoundIt != _lineCache.begin() && lowerBoundIt != _lineCache.end()) {
@@ -282,13 +284,14 @@ stdx::optional<Line> PieceTable::getLine(size_t lineNumber) {
         }
     }
 
-    auto it = lowerBoundIt->second.nextLine();
+    auto it = lowerBoundIt->second.end();
     auto curLineNumber = lowerBoundIt->first;
     decltype(_lineCache)::iterator insertedIt = lowerBoundIt;
 
     while (it != end() && curLineNumber != lineNumber) {
-        std::tie(insertedIt, std::ignore) = _lineCache.emplace(++curLineNumber, _findEOL(it));
-        it = insertedIt->second.nextLine();
+        std::tie(insertedIt, std::ignore) =
+            _lineCache.emplace(++curLineNumber, findLineStartingAt(it, end()));
+        it = insertedIt->second.end();
     }
 
     if (curLineNumber != lineNumber) {
