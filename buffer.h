@@ -112,8 +112,11 @@ class Line {
 public:
     using iterator = BufferStorage::Iterator;
 
-    Line(iterator begin, iterator end, size_t size)
-        : _begin(std::move(begin)), _end(std::move(end)), _size(size) {}
+    Line(iterator begin, iterator end, size_t size, size_t lineEndingCount)
+        : _begin(std::move(begin)),
+          _end(std::move(end)),
+          _size(size),
+          _lineEndingCount(lineEndingCount) {}
     Line() = default;
 
     iterator begin() const {
@@ -128,10 +131,15 @@ public:
         return _size;
     }
 
+    size_t lineEndingCount() const {
+        return _lineEndingCount;
+    }
+
 private:
     iterator _begin;
     iterator _end;
     size_t _size = 0;
+    size_t _lineEndingCount = 0;
 };
 
 class Buffer {

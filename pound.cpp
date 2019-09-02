@@ -256,23 +256,21 @@ int main(int argc, char** argv) try {
         } else if (c == KeyCodes::kDelete) {
             buffer->erase(terminalPosToBufferPos());
         } else if (c == KeyCodes::kBackspace) {
-            /*            auto pos = buffer->virtualPosition();
-                        if (pos.column == 0) {
-                            if (pos.row == 0) {
-                                continue;
-                            }
+            auto pos = buffer->virtualPosition();
+            auto it = terminalPosToBufferPos();
+            if (pos.column == 0) {
+                if (pos.row == 0) {
+                    continue;
+                }
 
-                            auto line = buffer->getLine(pos.row - 1);
-                            buffer->setVirtualPosition(Position(pos.row - 1, line->size()));
-                            const auto target = std::prev(line->end());
-                            auto it = std::prev(line->nextLine());
-                            while (it != target) {
-                                it = std::prev(buffer->erase(it));
-                            }
-                        } else { */
-            buffer->moveVirtualPosition(Direction::Left);
-            buffer->erase(terminalPosToBufferPos());
-            //}
+                auto prevLine = buffer->getLine(pos.row - 1);
+                buffer->setVirtualPosition(
+                    Position(pos.row - 1, prevLine->size() - prevLine->lineEndingCount()));
+                buffer->erase(std::prev(it));
+            } else {
+                buffer->moveVirtualPosition(Direction::Left);
+                buffer->erase(it);
+            }
         } else if (c == modCtrlKey('f')) {
             doFind(&term, buffer.get());
         } else if (c == modCtrlKey('s')) {

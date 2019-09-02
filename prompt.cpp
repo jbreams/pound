@@ -31,9 +31,9 @@ private:
 
 stdx::optional<Line> OneLinePrompt::PromptStorage::getLine(size_t lineNumber) {
     if (lineNumber == 0) {
-        return Line(IteratorImpl(_prompt.begin()), IteratorImpl(_prompt.end()), _prompt.size());
+        return Line(IteratorImpl(_prompt.begin()), IteratorImpl(_prompt.end()), _prompt.size(), 0);
     } else if (lineNumber == 1) {
-        return Line(IteratorImpl(_result.begin()), IteratorImpl(_result.end()), _result.size());
+        return Line(IteratorImpl(_result.begin()), IteratorImpl(_result.end()), _result.size(), 0);
     } else {
         throw PoundException("Cannot get line number {} from one-line prompt"_format(lineNumber));
     }
@@ -50,7 +50,7 @@ stdx::optional<Line> OneLinePrompt::getLine(size_t lineNumber) {
     auto line = _storage.getLine(lineNumber);
     if (_scrollOffset) {
         auto begin = std::next(line->begin(), _scrollOffset);
-        return Line(begin, line->end(), line->size() - _scrollOffset);
+        return Line(begin, line->end(), line->size() - _scrollOffset, 0);
     } else {
         return line;
     }

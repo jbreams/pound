@@ -9,7 +9,7 @@ stdx::optional<Line> DocumentBuffer::getLine(size_t lineNumber) {
 
     auto begin = std::next(line->begin(), _scrollOffset.column);
     auto size = line->size() - _scrollOffset.column;
-    return Line(begin, line->end(), size);
+    return Line(begin, line->end(), size, line->lineEndingCount());
 }
 
 Position DocumentBuffer::cursorPosition() const {
@@ -49,7 +49,7 @@ void DocumentBuffer::moveVirtualPosition(Direction dir, size_t count) {
                         throw PoundException(
                             "Could not find line at {}"_format(_virtualPosition.row));
                     }
-                    _virtualPosition.column = prevLine->size();
+                    _virtualPosition.column = prevLine->size() - prevLine->lineEndingCount();
                 }
                 break;
             case Direction::Right: {
@@ -59,7 +59,7 @@ void DocumentBuffer::moveVirtualPosition(Direction dir, size_t count) {
                         "Could not find current line at {}"_format(_virtualPosition.row));
                 }
 
-                if (_virtualPosition.column < line->size()) {
+                if (_virtualPosition.column < line->size() - line->lineEndingCount()) {
                     _virtualPosition.column++;
                     break;
                 }

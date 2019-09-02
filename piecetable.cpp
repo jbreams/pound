@@ -248,17 +248,19 @@ Line findLineStartingAt(const BufferStorage::Iterator& first, const BufferStorag
         ++size;
     }
 
+    size_t lineEndingCount = 0;
     while (it != last && isEOL(*it)) {
         auto prevCh = *it;
         ++it;
         ++size;
+        ++lineEndingCount;
 
         if (it == last || *it == prevCh) {
             break;
         }
     }
 
-    return Line{begin, it, size};
+    return Line{begin, it, size, lineEndingCount};
 }
 
 stdx::optional<Line> PieceTable::getLine(size_t lineNumber) {
