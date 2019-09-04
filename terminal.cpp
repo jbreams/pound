@@ -20,6 +20,8 @@ Terminal::Terminal(Buffer* buffer) : _buffer(buffer) {
     raw.c_oflag &= ~(OPOST);
     raw.c_cflag |= (CS8);
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
     _terminalSize = getTerminalSize();
     write(escape::kSwitchToAlternateScreen);
@@ -59,7 +61,7 @@ Position Terminal::_getCursorPositionFromTerminal() {
     off_t i = 0;
     write(escape::kGetCursorPosition);
     for (size_t i = 0; i < buf.size(); ++i) {
-        buf[i] = _read();
+        buf[i] = _read().value_or('R');
         if (buf[i] == 'R') {
             break;
         }
@@ -88,12 +90,16 @@ void Terminal::_write(const T* ptr, size_t size) {
 }
 
 template <typename T>
-T Terminal::_read() {
+stdx::optional<T> Terminal::_read() {
     T val;
     int ret;
     do {
         ret = ::read(STDIN_FILENO, &val, sizeof(val));
     } while (ret != sizeof(val) && errno == EINTR);
+
+    if (ret == 0 || errno == EAGAIN) {
+        return stdx::nullopt;
+    }
 
     if (ret != sizeof(val)) {
         throw std::system_error(errno, std::generic_category());
@@ -190,7 +196,12 @@ void Terminal::refresh() {
 }
 
 KeyCodes Terminal::readKeyCode() {
-    char ch = _read();
+    auto maybeCh = _read<char>();
+    while (!maybeCh) {
+        maybeCh = _read<char>();
+    }
+
+    char ch = *maybeCh;
     if (ch != '\x1b') {
         if (ch == '\r') {
             return KeyCodes::kNewLine;
@@ -198,11 +209,11 @@ KeyCodes Terminal::readKeyCode() {
         return static_cast<KeyCodes>(ch);
     }
 
-    char seqFirst = _read();
-    char seqSecond = _read();
+    char seqFirst = _read().value_or('\0');
+    char seqSecond = _read().value_or('\0');
     if (seqFirst == '[') {
         if (seqSecond >= '0' && seqSecond <= '9') {
-            char seqThird = _read();
+            char seqThird = _read().value_or('\0');
             if (seqThird == '~') {
                 switch (seqSecond) {
                     case '1':
@@ -242,6 +253,10 @@ KeyCodes Terminal::readKeyCode() {
             case 'F':
                 return KeyCodes::kEnd;
         }
+    }
+
+    if (seqFirst || seqSecond) {
+        _statusMessage = "Unknown escape sequence {:d} {:d}"_format(seqFirst, seqSecond);
     }
 
     return KeyCodes::kEscape;

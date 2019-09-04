@@ -116,7 +116,7 @@ private:
     void _write(const T* ptr, size_t size);
 
     template <typename T = char>
-    T _read();
+    stdx::optional<T> _read();
 
     termios _oldMode;
     stdx::optional<Position> _terminalSize;

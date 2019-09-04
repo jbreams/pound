@@ -26,7 +26,7 @@ public:
 
     using Decorations = std::multiset<Decoration>;
 
-    DocumentBuffer(const std::string fileName)
+    DocumentBuffer(const std::string& fileName)
         : PieceTable(fileName), _fileName(std::move(fileName)) {}
 
     bool showCursor() const override {

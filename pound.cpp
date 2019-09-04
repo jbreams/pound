@@ -325,14 +325,14 @@ int main(int argc, char** argv) try {
             buffers.emplace_back(doOpen(&term));
             curBuffer = buffers.size() - 1;
             term.setBuffer(buffers.back().get());
-        } else if (c == modCtrlKey('j')) {
+        } else if (c == modCtrlKey('z')) {
             if (curBuffer == 0) {
                 curBuffer = buffers.size() - 1;
             } else {
                 curBuffer--;
             }
             term.setBuffer(buffers.at(curBuffer).get());
-        } else if (c == modCtrlKey('k')) {
+        } else if (c == modCtrlKey('x')) {
             if (curBuffer == buffers.size() - 1) {
                 curBuffer = 0;
             } else {
@@ -348,8 +348,6 @@ int main(int argc, char** argv) try {
                    (std::isprint(static_cast<char>(c)) || c == KeyCodes::kNewLine)) {
             buffer->insert(terminalPosToBufferPos(), static_cast<char>(c));
             buffer->moveVirtualPosition(Direction::Right);
-        } else {
-            term.setStatusMessage("Unknown character {}"_format(static_cast<int16_t>(c)));
         }
 
         term.refresh();
